@@ -1,0 +1,21 @@
+// Compile-only stubs of the legacy Xposed API (de.robv.android.xposed, API 82+).
+// The real classes are provided by LSPosed at runtime; nothing from here is packaged.
+plugins {
+    id 'java-library'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+def sdkDir = {
+    def props = new Properties()
+    def f = rootProject.file('local.properties')
+    if (f.exists()) f.withInputStream { props.load(it) }
+    props.getProperty('sdk.dir') ?: System.getenv('ANDROID_HOME')
+}()
+
+dependencies {
+    compileOnly files("${sdkDir}/platforms/android-36/android.jar")
+}
