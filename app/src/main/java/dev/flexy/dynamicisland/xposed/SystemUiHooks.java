@@ -45,6 +45,7 @@ final class SystemUiHooks {
         ShadeLayoutCallbacks.install();
         ShadeLiveCards.install(cl);
         HideDuplicated.install(cl);
+        TorchNotificationDelay.install(cl);
         ShadeCardTheme.install(cl);
         ShadeMediaPlayer.install(cl);
         XLog.i("SystemUI hooks installed");

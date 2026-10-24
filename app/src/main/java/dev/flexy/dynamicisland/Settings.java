@@ -32,7 +32,9 @@ public final class Settings {
     public static final int POS_CAMERA = 2;
     public static final int DEF_POSITION = POS_CENTER;
 
+    public static final String POSITION_PHONE = "island_position_phone";
     public static final String GLASS_PILL = "glass_pill";
+    public static final String GLASS_PILL_PHONE = "glass_pill_phone";
     public static final boolean DEF_GLASS_PILL = false;
 
     private Settings() {

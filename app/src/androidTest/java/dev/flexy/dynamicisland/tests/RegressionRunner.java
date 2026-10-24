@@ -31,7 +31,7 @@ public final class RegressionRunner extends Instrumentation {
         Bundle result = new Bundle();
         Throwable[] failure = {null};
         runOnMainSync(() -> {
-            try { progressCard(); mobileLeaves(); duplicates(); metrics(); splash(); scorer(); shadeLayoutCallbacks(); alerts(); maxChars(); batteryIcon(); }
+            try { progressCard(); mobileLeaves(); duplicates(); metrics(); splash(); scorer(); shadeLayoutCallbacks(); alerts(); maxChars(); batteryIcon(); torchCard(); }
             catch (Throwable t) { failure[0] = t; }
         });
         if (failure[0] != null) {
@@ -217,6 +217,37 @@ public final class RegressionRunner extends Instrumentation {
         java.io.File file = new java.io.File(ctx.getExternalFilesDir(null), "battery-card.png");
         try (java.io.FileOutputStream stream = new java.io.FileOutputStream(file)) {
             card.compress(Bitmap.CompressFormat.PNG, 100, stream);
+        }
+    }
+
+    private void torchCard() throws Exception {
+        Context ctx = getTargetContext();
+        float d = ctx.getResources().getDisplayMetrics().density;
+        float w = 380 * d;
+        int[][] states = {{0, 1}, {1, 2}, {1, 5}};
+        Bitmap sheet = null;
+        int y = 0;
+        for (int[] s : states) {
+            IslandItem item = new IslandItem("torch");
+            item.torch = true;
+            item.torchOn = s[0] == 1;
+            item.torchLevel = s[1];
+            item.torchMax = 5;
+            IslandView renderer = new IslandView(ctx, null);
+            int h = (int) Math.ceil(renderer.shadeCardHeight(item, w));
+            if (sheet == null) sheet = Bitmap.createBitmap((int) w, h * states.length, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(sheet);
+            c.translate(0, y);
+            c.clipRect(0, 0, w, h);
+            c.drawColor(0xFF000000);
+            renderer.drawShadeCard(c, item, w);
+            y += h;
+        }
+        int lit = sheet.getPixel((int) (130 * d), sheet.getHeight() * 5 / 6);
+        check(Color.blue(lit) > 60, "torch beam glows at full level (" + Integer.toHexString(lit) + ")");
+        java.io.File file = new java.io.File(ctx.getExternalFilesDir(null), "torch-card.png");
+        try (java.io.FileOutputStream stream = new java.io.FileOutputStream(file)) {
+            sheet.compress(Bitmap.CompressFormat.PNG, 100, stream);
         }
     }
 

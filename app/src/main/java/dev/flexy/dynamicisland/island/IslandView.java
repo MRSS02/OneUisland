@@ -389,18 +389,22 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
 
     public void setGeometry(int screenWidth, float centerX, float centerY, float holeDiameter, boolean isTablet,
-                            float anchor, boolean glass) {
+                            float anchor, boolean glass, float limit) {
         if (glassPill != glass) {
             glassPill = glass;
             invalidate();
             scheduleFrame();
         }
+        rightLimit = limit;
         boolean sameAnchor = Float.isNaN(anchor) ? Float.isNaN(anchorLeft)
                 : !Float.isNaN(anchorLeft) && Math.abs(anchor - anchorLeft) <= 1.5f;
         boolean moved = !sameAnchor || Math.abs(cx - centerX) > 1.5f;
         boolean changed = screenW != screenWidth || Math.abs(cy - centerY) > 1.5f
                 || Math.abs(holeD - holeDiameter) > 1.5f || tablet != isTablet;
-        if (!changed && !moved) return;
+        if (!changed && !moved) {
+            refreshLimit();
+            return;
+        }
         float pillW = Math.max(0f, width.value());
         float before = centerFor(pillW);
         boolean animate = moved && screenW == screenWidth && screenW > 0;
@@ -412,6 +416,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             scheduleFrame();
         }
         if (!changed) {
+            refreshLimit();
             invalidate();
             notifyHost();
             return;
@@ -420,7 +425,10 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         cy = centerY;
         holeD = holeDiameter;
         tablet = isTablet;
-        maxPillW = Math.min(screenWidth * 0.72f, dp(isTablet ? 340 : 300));
+        applyPillLimit();
+        IslandItem oldSecondary = secondary;
+        if (!bubbleFits(primary)) secondary = null;
+        if (oldSecondary != secondary) updateBubble(oldSecondary, secondary);
         cardMargin = dp(isTablet ? 16 : 12);
         cardMaxW = dp(isTablet ? 380 : 420);
         if (mode == Mode.COMPACT && primary != null) {
@@ -434,6 +442,45 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         if (secondary != null) bubbleIn = Layer.shown(new BubbleContent(secondary));
         invalidate();
         notifyHost();
+    }
+
+    private float rightLimit = Float.NaN;
+
+    private boolean applyPillLimit() {
+        float base = Math.min(screenW * 0.72f, dp(tablet ? 340 : 300));
+        if (!Float.isNaN(anchorLeft) && !Float.isNaN(rightLimit)) {
+            base = Math.max(minPillW, Math.min(base, rightLimit - anchorLeft));
+        }
+        boolean changed = Math.abs(base - maxPillW) > 0.5f;
+        maxPillW = base;
+        return changed;
+    }
+
+    private boolean bubbleFits(IslandItem main) {
+        if (main == null || Float.isNaN(anchorLeft) || Float.isNaN(rightLimit)) return true;
+        float w = new CompactContent(main).desiredWidth();
+        return anchorLeft + w + bubbleGap + bubbleR * 2f <= rightLimit;
+    }
+
+    private void refreshLimit() {
+        if (screenW <= 0) return;
+        boolean changed = applyPillLimit();
+        if (changed && mode == Mode.COMPACT && primary != null) {
+            mainIn = mainIn == null ? Layer.shown(new CompactContent(primary))
+                    : Layer.shownLike(new CompactContent(primary), mainIn);
+            width.animateTo(mainIn.content.desiredWidth(), 0.30f, 0.80f);
+        }
+        IslandItem want = items.size() > 1 && bubbleFits(primary) ? items.get(1) : null;
+        if (want != secondary && mode != Mode.EXPANDED) {
+            IslandItem old = secondary;
+            secondary = want;
+            updateBubble(old, secondary);
+            changed = true;
+        }
+        if (changed) {
+            scheduleFrame();
+            invalidate();
+        }
     }
 
     public void setItems(List<IslandItem> sorted) {
@@ -463,7 +510,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         }
 
         primary = items.isEmpty() ? null : items.get(0);
-        secondary = items.size() > 1 ? items.get(1) : null;
+        secondary = items.size() > 1 && bubbleFits(primary) ? items.get(1) : null;
 
         if (primary == null) {
             if (mode == Mode.EXPANDED) collapseCards(false);
@@ -993,6 +1040,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private boolean drawnHidden;
 
     private void scheduleFrame() {
+        if (host == null) return;
         if (!frameScheduled) {
             frameScheduled = true;
             choreographer.postFrameCallback(this);
@@ -1022,6 +1070,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         active |= pillBlob.step(dt);
         active |= stackDx.step(dt);
         active |= stackDy.step(dt);
+        active |= torchPos.step(dt);
         active |= buttonAnimating();
 
         if (mode == Mode.HIDDEN && holeD > 0 && visibility.target() > 0f) {
@@ -1152,6 +1201,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         if (mainIn != null) need |= runningStopwatch(mainIn.content.item);
         need |= now() < rollUntil;
         need |= toggleAnimating();
+        need |= torchAnimating();
         if (bubbleIn != null) need |= bubbleIn.content.item.pulsingDot || runningStopwatch(bubbleIn.content.item);
         for (Card c : cards) {
             need |= c.item.pulsingDot;
@@ -1402,7 +1452,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private void computeCard(Card c, RectF out) {
         float w = Math.max(0f, c.w.value());
         float h = Math.max(0f, c.h.value());
-        float left = centerFor(w) - w / 2f;
+        float left = cardLeft(c, w);
         if (w < screenW) left = Math.max(Math.min(left, screenW - cardMargin - w), Math.min(cardMargin, left));
         float top = c.cy.value() - h / 2f;
         if (!c.leaving) {
@@ -1415,6 +1465,16 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             left += dx;
         }
         out.set(left, top, left + w, top + h);
+    }
+
+    private float cardLeft(Card c, float w) {
+        if (Float.isNaN(anchorLeft)) return cx - w / 2f;
+        float bw = c.body.w;
+        float finalLeft = anchorLeft;
+        if (bw < screenW) finalLeft = Math.max(Math.min(finalLeft, screenW - cardMargin - bw), cardMargin);
+        float start = Math.min(bw, pillH * 1.8f);
+        float t = clamp01((w - start) / Math.max(1f, bw - start));
+        return lerp(anchorLeft + start / 2f, finalLeft + bw / 2f, t) - w / 2f;
     }
 
     private float expansion(Card c) {
@@ -1677,6 +1737,10 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     private void drawLeadingMono(Canvas c, IslandItem item, float left, float midY, float size, float alpha) {
+        if (item.torch) {
+            drawTorchCompact(c, item, left, midY, size, alpha);
+            return;
+        }
         if (item.pulsingDot || item.icon == null) {
             drawLeading(c, item, left, midY, size, alpha);
             return;
@@ -2072,6 +2136,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     private CardBody makeBody(IslandItem it, float w, boolean shadeCard) {
         if (it.isMedia) return new MediaBody(it, w);
+        if (it.torch) return new TorchBody(it, w);
         if (it.alert) return new AlertBody(it, w);
         if (!shadeCard && it.remoteView != null && remoteLayer != null) {
             try {
@@ -2104,6 +2169,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     public void drawShadeCard(Canvas canvas, IslandItem item, float width) {
+        if (item.torch) stepShadeTorch();
         shadeBody(item, width).draw(canvas, 0f, 0f, 1f, IN_MS + 3 * ROW_STAGGER_MS);
     }
 
@@ -2209,7 +2275,33 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     public boolean shadeButtonAnimating() {
-        return buttonAnimating();
+        return buttonAnimating() || torchAnimating();
+    }
+
+    private long shadeTorchFrame;
+
+    private void stepShadeTorch() {
+        long t = SystemClock.uptimeMillis();
+        float dt = shadeTorchFrame == 0 ? 1f / 120f : Math.min(0.05f, (t - shadeTorchFrame) / 1000f);
+        shadeTorchFrame = t;
+        torchPos.step(dt);
+    }
+
+    public boolean shadeTorchStart(IslandItem item, float width, float x, float y) {
+        CardBody body = shadeBody(item, width);
+        if (!(body instanceof TorchBody) || !((TorchBody) body).onTrack(x, y)) return false;
+        torchDrag = (TorchBody) body;
+        torchDragStep = torchStep(item, torchPos.value());
+        moveTorch(torchDrag, x);
+        return true;
+    }
+
+    public boolean shadeTorchMove(float x) {
+        return torchDrag != null && moveTorch(torchDrag, x);
+    }
+
+    public void shadeTorchEnd() {
+        endTorchDrag();
     }
 
     private final class Btn {
@@ -2649,6 +2741,353 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 titlePaint.setColor(Colors.withAlpha(item.trailingColor != 0 ? item.trailingColor : item.accent, a0));
                 c.drawText(trail, right - titlePaint.measureText(trail), midY - (tf.ascent + tf.descent) / 2f, titlePaint);
             }
+        }
+    }
+
+    private static final int TORCH_OFF = 0xFF2C2C31;
+    private static final long TORCH_IGNITE_MS = 620;
+    private static final long TORCH_FADE_MS = 460;
+    private final Spring torchPos = new Spring(1f, 0.32f, 0.62f).setValueThreshold(0.001f);
+    private boolean torchSeen;
+    private boolean torchTarget;
+    private long torchSwitchAt;
+    private float torchFrom;
+    private long torchLocalAt;
+    private long torchSetAt;
+    private TorchBody torchDrag;
+    private int torchDragStep;
+    private final Path torchPath = new Path();
+    private final Path torchNeck = new Path();
+    private final Path torchCone = new Path();
+    private final android.graphics.Matrix torchMatrix = new android.graphics.Matrix();
+    private final Paint torchPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private BlurMaskFilter torchBlur;
+    private float torchBlurSize;
+
+    private static float torchFrac(IslandItem it, boolean on) {
+        return on ? it.torchLevel / (float) Math.max(1, it.torchMax) : 0f;
+    }
+
+    private static int torchStep(IslandItem it, float f) {
+        return Math.round(clamp01(f) * Math.max(1, it.torchMax));
+    }
+
+    private void syncTorch(IslandItem it) {
+        long t = now();
+        if (!torchSeen) {
+            torchSeen = true;
+            torchTarget = it.torchOn;
+            torchSwitchAt = t - TORCH_IGNITE_MS;
+            torchFrom = it.torchOn ? 1f : 0f;
+            torchPos.snapTo(torchFrac(it, it.torchOn));
+        }
+        if (it.torchOn != torchTarget && t - torchLocalAt > 1500) setTorchTarget(it.torchOn);
+        float want = torchFrac(it, torchTarget);
+        if (torchDrag == null && t - torchSetAt > 900 && Math.abs(torchPos.target() - want) > 0.001f) {
+            torchPos.animateTo(want, 0.32f, 0.62f);
+            scheduleFrame();
+        }
+    }
+
+    private void setTorchTarget(boolean on) {
+        if (on == torchTarget) return;
+        long t = now();
+        torchFrom = torchExtent(t);
+        torchTarget = on;
+        torchSwitchAt = t;
+        scheduleFrame();
+    }
+
+    private float torchU(long t) {
+        return clamp01((t - torchSwitchAt) / (float) (torchTarget ? TORCH_IGNITE_MS : TORCH_FADE_MS));
+    }
+
+    private float torchGlow(long t) {
+        float u = torchU(t);
+        if (torchTarget) return torchFrom + (1f - torchFrom) * easeOutCubic(Math.min(1f, u * 2.4f));
+        return torchFrom * (1f - easeInOut(clamp01((u - 0.55f) / 0.45f)));
+    }
+
+    private float torchExtent(long t) {
+        float u = torchU(t);
+        if (torchTarget) return torchFrom + (1f - torchFrom) * easeOutCubic(u);
+        return torchFrom * (1f - easeInOut(Math.min(1f, u * 1.15f)));
+    }
+
+    private float torchFlare(long t) {
+        if (!torchTarget) return 0f;
+        float u = torchU(t);
+        return (float) Math.sin(Math.PI * clamp01((u - 0.35f) / 0.65f)) * 0.22f;
+    }
+
+    private boolean torchAnimating() {
+        if (!torchSeen) return false;
+        return torchDrag != null || !torchPos.isAtRest() || now() - torchSwitchAt < Math.max(TORCH_IGNITE_MS, TORCH_FADE_MS) + 40;
+    }
+
+    private boolean moveTorch(TorchBody tb, float lx) {
+        float f = tb.fractionAt(lx);
+        torchPos.snapTo(f);
+        int step = torchStep(tb.item, f);
+        boolean changed = step != torchDragStep;
+        if (changed) {
+            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            torchDragStep = step;
+            if (torchTarget != (step > 0)) {
+                torchLocalAt = now();
+                setTorchTarget(step > 0);
+            }
+            torchSetAt = now();
+            if (tb.item.torchSet != null) tb.item.torchSet.accept(step);
+        }
+        scheduleFrame();
+        invalidate();
+        return changed;
+    }
+
+    private void endTorchDrag() {
+        TorchBody tb = torchDrag;
+        torchDrag = null;
+        if (tb == null) return;
+        int step = torchStep(tb.item, torchPos.value());
+        float target = step / (float) Math.max(1, tb.item.torchMax);
+        torchPos.animateTo(target, 0.34f, 0.58f);
+        torchSetAt = now();
+        if (step != torchDragStep && tb.item.torchSet != null) tb.item.torchSet.accept(step);
+        torchDragStep = step;
+        scheduleFrame();
+    }
+
+    private void torchTap(IslandItem it) {
+        torchLocalAt = now();
+        torchSetAt = now();
+        setTorchTarget(!torchTarget);
+        torchPos.animateTo(torchFrac(it, torchTarget), 0.42f, 0.9f);
+        if (it.torchToggle != null) it.torchToggle.run();
+    }
+
+    private void torchGlyph(Canvas c, float cx, float cy, float len, float deg, int color, float alpha, float glow) {
+        int save = c.save();
+        c.translate(cx, cy);
+        c.rotate(deg);
+        float half = len / 2f;
+        float capT = 0.11f * len;
+        float gap = 0.04f * len;
+        float taper = 0.20f * len;
+        float capH = 0.46f * len;
+        float bodyH = 0.29f * len;
+        float capL = half - capT;
+        float neckR = capL - gap;
+        float neckL = neckR - taper;
+        torchPath.rewind();
+        float rr = bodyH * 0.28f;
+        tmpRect.set(-half, -bodyH / 2f, neckL + rr, bodyH / 2f);
+        torchPath.addRoundRect(tmpRect, rr, rr, Path.Direction.CW);
+        torchNeck.rewind();
+        torchNeck.moveTo(neckL, -bodyH / 2f);
+        torchNeck.lineTo(neckR, -capH / 2f);
+        torchNeck.lineTo(neckR, capH / 2f);
+        torchNeck.lineTo(neckL, bodyH / 2f);
+        torchNeck.close();
+        torchPath.op(torchNeck, Path.Op.UNION);
+        float cr = capT * 0.42f;
+        tmpRect.set(capL, -capH / 2f, half, capH / 2f);
+        torchPath.addRoundRect(tmpRect, cr, cr, Path.Direction.CW);
+        if (glow > 0.01f) {
+            float blur = len * 0.16f;
+            if (torchBlur == null || Math.abs(torchBlurSize - blur) > 0.5f) {
+                torchBlur = new BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL);
+                torchBlurSize = blur;
+            }
+            torchPaint.setShader(null);
+            torchPaint.setMaskFilter(torchBlur);
+            torchPaint.setColor(Colors.withAlpha(FlashlightSource.ACCENT, alpha * 0.75f * glow));
+            c.drawPath(torchPath, torchPaint);
+            torchPaint.setMaskFilter(null);
+        }
+        torchPaint.setColor(Colors.withAlpha(color, alpha));
+        c.drawPath(torchPath, torchPaint);
+        c.restoreToCount(save);
+    }
+
+    private static float torchLit(float f) {
+        return 0.2f + 0.8f * clamp01(f);
+    }
+
+    private static int torchColor(float lit, float g) {
+        return Colors.blend(TORCH_OFF, Colors.blend(0xFF9C99CF, 0xFFF2F0FF, lit), g);
+    }
+
+    private void beamColumn(Canvas c, float hx, float cy, float reach, float mouth, float far, float blur, Shader shader) {
+        float tip = hx + reach;
+        torchCone.rewind();
+        torchCone.moveTo(hx - dp(4), cy - mouth);
+        torchCone.cubicTo(hx + reach * 0.3f, cy - far * 1.1f, tip - reach * 0.2f, cy - far, tip, cy - far * 0.72f);
+        torchCone.quadTo(tip + far, cy, tip, cy + far * 0.72f);
+        torchCone.cubicTo(tip - reach * 0.2f, cy + far, hx + reach * 0.3f, cy + far * 1.1f, hx - dp(4), cy + mouth);
+        torchCone.close();
+        drawBlurred(c, torchCone, blur, shader);
+    }
+
+    private final java.util.HashMap<Integer, BlurMaskFilter> torchBlurs = new java.util.HashMap<>();
+
+    private void drawBlurred(Canvas c, Path path, float radius, Shader shader) {
+        int key = Math.round(radius);
+        BlurMaskFilter blur = torchBlurs.get(key);
+        if (blur == null) {
+            blur = new BlurMaskFilter(Math.max(1f, radius), BlurMaskFilter.Blur.NORMAL);
+            torchBlurs.put(key, blur);
+        }
+        torchPaint.setMaskFilter(blur);
+        torchPaint.setShader(shader);
+        torchPaint.setColor(0xFFFFFFFF);
+        c.drawPath(path, torchPaint);
+        torchPaint.setShader(null);
+        torchPaint.setMaskFilter(null);
+    }
+
+    private void radialGlow(Canvas c, float cx, float cy, float rx, float ry, int[] colors, float[] stops) {
+        if (rx < 1f || ry < 1f) return;
+        RadialGradient g = new RadialGradient(0f, 0f, 1f, colors, stops, Shader.TileMode.CLAMP);
+        torchMatrix.setScale(rx, ry);
+        torchMatrix.postTranslate(cx, cy);
+        g.setLocalMatrix(torchMatrix);
+        torchPaint.setShader(g);
+        tmpRect.set(cx - rx, cy - ry, cx + rx, cy + ry);
+        c.drawOval(tmpRect, torchPaint);
+        torchPaint.setShader(null);
+    }
+
+    private void drawTorchCompact(Canvas c, IslandItem item, float left, float midY, float size, float alpha) {
+        syncTorch(item);
+        float g = torchGlow(now());
+        float lit = torchLit(torchPos.value());
+        float cx = left + size / 2f;
+        if (g > 0.01f) {
+            int a = FlashlightSource.ACCENT;
+            float k = g * (0.35f + 0.65f * lit);
+            radialGlow(c, cx, midY, size * 0.8f, size * 0.8f,
+                    new int[] {Colors.withAlpha(a, alpha * 0.55f * k), Colors.withAlpha(a, alpha * 0.22f * k), Colors.withAlpha(a, 0f)},
+                    new float[] {0f, 0.45f, 1f});
+        }
+        torchGlyph(c, cx, midY, size * 0.86f, -90f, Colors.blend(0xFF8E8E93,Colors.blend(0xFF9C99CF, 0xFFF2F0FF, lit), g), alpha,
+                g * (0.3f + 0.4f * lit));
+    }
+
+    private final class TorchBody extends CardBody {
+        final float pad = dp(20);
+        final float len = dp(66);
+        final float iconCx;
+        final float headX;
+        final float x0;
+        final float x1;
+
+        TorchBody(IslandItem item, float w) {
+            super(item, w);
+            h = dp(132);
+            iconCx = pad + dp(6) + len / 2f;
+            headX = iconCx + len / 2f;
+            x0 = headX + dp(30);
+            x1 = w - pad - dp(24);
+            Btn b = new Btn();
+            b.r.set(iconCx - len / 2f - dp(8), h / 2f - dp(30), headX + dp(8), h / 2f + dp(30));
+            b.bg = 0;
+            b.run = () -> torchTap(item);
+            buttons.add(b);
+        }
+
+        boolean onTrack(float lx, float ly) {
+            return lx >= headX + dp(6) && ly >= 0 && ly <= h;
+        }
+
+        float fractionAt(float lx) {
+            return clamp01((lx - x0) / Math.max(1f, x1 - x0));
+        }
+
+        @Override
+        void draw(Canvas c, float x, float y, float alpha, long el) {
+            syncTorch(item);
+            float a0 = alpha * rowAlpha(el, 0);
+            long t = now();
+            float g = torchGlow(t);
+            float e = torchExtent(t);
+            float flare = torchFlare(t);
+            float f = clamp01(torchPos.value());
+            float cy = y + h / 2f;
+            float hx = x + headX;
+            float mx = x + x0 + f * (x1 - x0);
+            int accent = FlashlightSource.ACCENT;
+            float lit = torchLit(f);
+            float full = x + x1 + dp(14) - hx;
+            float reach = Math.max(0f, full * e);
+            if (g > 0.003f && reach > dp(2)) {
+                float k = g * lit * (1f + flare);
+                float tip = hx + reach;
+                float mouth = len * 0.23f;
+                float hazeFar = dp(84) * e;
+                torchCone.rewind();
+                torchCone.moveTo(hx - dp(6), cy - mouth * 1.1f);
+                torchCone.lineTo(tip, cy - hazeFar);
+                torchCone.lineTo(tip, cy + hazeFar);
+                torchCone.lineTo(hx - dp(6), cy + mouth * 1.1f);
+                torchCone.close();
+                drawBlurred(c, torchCone, dp(32), new LinearGradient(hx, 0, tip, 0,
+                        new int[] {Colors.withAlpha(0xFFCFCBEA, a0 * 0.52f * k), Colors.withAlpha(0xFFB9B2CF, a0 * 0.30f * k),
+                                Colors.withAlpha(0xFF9F98B5, a0 * 0.14f * k)},
+                        new float[] {0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+                beamColumn(c, hx, cy, reach, mouth * 1.05f, dp(36) * (0.5f + 0.5f * e), dp(16), new LinearGradient(hx, 0, tip + dp(30), 0,
+                        new int[] {Colors.withAlpha(0xFFE4DEFF, a0 * 0.62f * k), Colors.withAlpha(0xFFD3C3E6, a0 * 0.42f * k),
+                                Colors.withAlpha(0xFFC9B2CF, a0 * 0.26f * k), Colors.withAlpha(0xFFB2A8D6, a0 * 0.12f * k)},
+                        new float[] {0f, 0.3f, 0.62f, 1f}, Shader.TileMode.CLAMP));
+                beamColumn(c, hx, cy, reach, mouth * 0.7f, dp(18) * (0.5f + 0.5f * e), dp(8), new LinearGradient(hx, 0, tip + dp(18), 0,
+                        new int[] {Colors.withAlpha(0xFFF7F5FF, a0 * 0.70f * k), Colors.withAlpha(0xFFE7DEF5, a0 * 0.42f * k),
+                                Colors.withAlpha(0xFFD8C6DE, a0 * 0.22f * k), Colors.withAlpha(0xFFC4BBE6, a0 * 0.08f * k)},
+                        new float[] {0f, 0.28f, 0.6f, 1f}, Shader.TileMode.CLAMP));
+                float spotL = full * 0.3f * e;
+                int spot = Colors.blend(0xFFC4C0F4, 0xFFFFFFFF, lit);
+                radialGlow(c, hx + spotL * 0.8f, cy, spotL * 1.1f, mouth * 1.25f,
+                        new int[] {Colors.withAlpha(0xFFDCD7FF, a0 * 0.40f * k), Colors.withAlpha(0xFFDCD7FF, a0 * 0.16f * k), Colors.withAlpha(accent, 0f)},
+                        new float[] {0f, 0.5f, 1f});
+                radialGlow(c, hx + spotL * 0.82f, cy, spotL, mouth * 0.95f,
+                        new int[] {Colors.withAlpha(spot, a0 * Math.min(1f, 1.05f * k + 0.1f * g)), Colors.withAlpha(spot, a0 * 0.75f * k),
+                                Colors.withAlpha(0xFFDCD7FF, a0 * 0.28f * k), Colors.withAlpha(accent, 0f)},
+                        new float[] {0f, 0.35f, 0.7f, 1f});
+                radialGlow(c, x + iconCx + len * 0.25f, cy, len * 0.85f, len * 0.6f,
+                        new int[] {Colors.withAlpha(accent, a0 * 0.22f * g * (0.4f + 0.6f * lit)), Colors.withAlpha(accent, 0f)},
+                        new float[] {0f, 1f});
+            }
+            if (item.torchMax >= 1) {
+                float step = (x1 - x0) / item.torchMax;
+                for (int i = 1; i <= item.torchMax; i++) {
+                    float dx = x + x0 + i * step;
+                    if (dx < mx + dp(9)) continue;
+                    fillPaint.setColor(Colors.withAlpha(0xFFFFFFFF, a0 * 0.32f));
+                    c.drawCircle(dx, cy, dp(1.7f), fillPaint);
+                }
+                float lineH = dp(12) + dp(14) * f;
+                strokePaint.setStrokeWidth(dp(3));
+                strokePaint.setColor(Colors.withAlpha(Colors.blend(0xFF5A5A60, 0xFFFFFFFF, g), a0 * (0.55f + 0.4f * g)));
+                c.drawLine(mx, cy - lineH / 2f, mx, cy + lineH / 2f, strokePaint);
+                if (g > 0.01f) {
+                    float sy = cy + lineH / 2f + dp(16);
+                    int sun = Colors.withAlpha(0xFFFFFFFF, a0 * 0.6f * g);
+                    strokePaint.setStrokeWidth(dp(1.5f));
+                    strokePaint.setColor(sun);
+                    c.drawCircle(mx, sy, dp(4.2f), strokePaint);
+                    fillPaint.setColor(sun);
+                    for (int i = 0; i < 8; i++) {
+                        double ang = Math.PI * 2 * i / 8;
+                        c.drawCircle(mx + (float) Math.cos(ang) * dp(8.2f), sy + (float) Math.sin(ang) * dp(8.2f), dp(1.05f), fillPaint);
+                    }
+                }
+            }
+            Btn b = buttons.get(0);
+            float pr = pressOf(b, item);
+            int save = c.save();
+            float sc = 1f - 0.08f * pr;
+            c.scale(sc, sc, x + iconCx, cy);
+            torchGlyph(c, x + iconCx, cy, len, 0f, torchColor(lit, g), a0, g * (0.35f + 0.65f * lit));
+            c.restoreToCount(save);
         }
     }
 
@@ -3566,6 +4005,18 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                             invalidate();
                         }
                     }
+                    if (downCard.body instanceof TorchBody) {
+                        computeCard(downCard, cardRect);
+                        TorchBody tb = (TorchBody) downCard.body;
+                        float lx = downX - cardContentLeft(downCard);
+                        if (tb.onTrack(lx, downY - cardRect.top)) {
+                            torchDrag = tb;
+                            torchDragStep = torchStep(tb.item, torchPos.value());
+                            moveTorch(tb, lx);
+                            getParent().requestDisallowInterceptTouchEvent(true);
+                            return true;
+                        }
+                    }
                     if (seekBody == null) {
                         computeCard(downCard, cardRect);
                         Btn pb = downCard.body.hit(downX - cardContentLeft(downCard), downY - cardRect.top);
@@ -3599,6 +4050,10 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     seekFraction = seekBody.fractionAt(e.getX() - cardContentLeft(downCard));
                     scheduleFrame();
                     invalidate();
+                    return true;
+                }
+                if (torchDrag != null && downCard != null) {
+                    moveTorch(torchDrag, e.getX() - cardContentLeft(downCard));
                     return true;
                 }
                 float dx = e.getX() - downX;
@@ -3663,6 +4118,10 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     invalidate();
                     return true;
                 }
+                if (torchDrag != null) {
+                    endTorchDrag();
+                    return true;
+                }
                 releaseButton();
                 press.animateTo(1f, 0.35f, 0.6f);
                 if (offsetX.value() != 0f) offsetX.animateTo(0f, 0.4f, 0.55f);
@@ -3702,6 +4161,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     host.onShadeDragEvent(e);
                 }
                 seekBody = null;
+                if (torchDrag != null) endTorchDrag();
                 releaseStack();
                 releaseButton();
                 press.animateTo(1f, 0.35f, 0.6f);
@@ -3731,6 +4191,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 else if (b.action != null) host.onItemAction(c.item, b.action);
                 return;
             }
+            if (c.body instanceof TorchBody) return;
             host.onOpenItem(c.item, new RectF(cardRect));
             collapse();
         }

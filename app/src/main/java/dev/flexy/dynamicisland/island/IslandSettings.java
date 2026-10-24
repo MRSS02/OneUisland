@@ -45,13 +45,14 @@ final class IslandSettings {
         return values.getBoolean(Settings.ALERT_RINGER, Settings.DEF_ALERT_RINGER);
     }
 
-    static int position() {
-        int v = values.getInt(Settings.POSITION, Settings.DEF_POSITION);
-        return v >= Settings.POS_CENTER && v <= Settings.POS_CAMERA ? v : Settings.DEF_POSITION;
+    static int position(boolean large) {
+        int v = values.getInt(large ? Settings.POSITION : Settings.POSITION_PHONE, Settings.DEF_POSITION);
+        int max = large ? Settings.POS_CAMERA : Settings.POS_LEFT;
+        return v >= Settings.POS_CENTER && v <= max ? v : Settings.DEF_POSITION;
     }
 
-    static boolean glassPill() {
-        return values.getBoolean(Settings.GLASS_PILL, Settings.DEF_GLASS_PILL);
+    static boolean glassPill(boolean large) {
+        return values.getBoolean(large ? Settings.GLASS_PILL : Settings.GLASS_PILL_PHONE, Settings.DEF_GLASS_PILL);
     }
 
     static void watch(Context ctx, Runnable onChanged) {

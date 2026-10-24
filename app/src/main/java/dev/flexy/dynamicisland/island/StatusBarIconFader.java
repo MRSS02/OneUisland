@@ -99,6 +99,7 @@ final class StatusBarIconFader {
                 v.getLocationOnScreen(loc);
                 iconRect.set(loc[0], loc[1], loc[0] + v.getWidth() * v.getScaleX(), loc[1] + v.getHeight() * v.getScaleY());
                 float m = hidden ? margin + hysteresis : margin;
+                if ("clock".equals(idName(v))) m = hidden ? 3f * density : 2f * density;
                 dateX = dateStart(v);
                 boolean vertical = iconRect.bottom > island.top && iconRect.top < island.bottom;
                 if (dateX > 0f) {

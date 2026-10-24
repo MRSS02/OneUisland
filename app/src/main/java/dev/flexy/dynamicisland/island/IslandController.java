@@ -40,6 +40,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
     final CastSource cast;
     final ExitAnimationBridge exit;
     final AlertSource alerts;
+    private final FlashlightSource torch;
     private final StatusBarIconFader fader;
     private final AudioLevels audio = new AudioLevels();
     private final float density;
@@ -157,6 +158,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         cast = new CastSource(ctx);
         exit = new ExitAnimationBridge(cl);
         alerts = new AlertSource(ctx, this::requestRefresh);
+        torch = new FlashlightSource(ctx, main, this::requestRefresh);
         fader = new StatusBarIconFader(density);
     }
 
@@ -182,7 +184,16 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         alerts.onNotifications(all);
     }
 
+    public boolean hasTorch() {
+        return torch.available();
+    }
+
+    public boolean torchOn() {
+        return torch.isOn();
+    }
+
     public IslandItem itemForKey(String notificationKey) {
+        if (torch.available() && FlashlightSource.isSystemTorchKey(notificationKey)) return torch.item();
         return oa.itemForKey(notificationKey);
     }
 
@@ -193,6 +204,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
     private void start() {
         media.start();
         alerts.start();
+        torch.start();
         IslandSettings.watch(ctx, () -> {
             if (view != null) view.onSettingsChanged();
             updateGeometry();
@@ -329,6 +341,8 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
             oa.collect(items, hidden, packages);
             media.collect(items, oa.foregroundPackage(), hidden, packages);
             cast.collect(items);
+            if (torch.available()) items.removeIf(FlashlightSource::isSystemTorchItem);
+            torch.collect(items, view.isExpanded());
         } catch (Throwable t) {
             XLog.e("collect failed", t);
         }
@@ -460,7 +474,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         int h = b.height();
         if (w <= 0 || h <= 0) return;
         boolean tablet = Math.min(w, h) / density >= 600f;
-        int position = tablet ? IslandSettings.position() : dev.flexy.dynamicisland.Settings.POS_CENTER;
+        int position = IslandSettings.position(tablet);
         float cx = w / 2f;
         float cy = statusBarCenterY();
         float holeD = 0f;
@@ -476,15 +490,18 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
             holeD = Math.min(top.width(), top.height()) * 0.78f;
         }
         float anchor = Float.NaN;
+        float limit = Float.NaN;
         if (position == dev.flexy.dynamicisland.Settings.POS_LEFT) {
             anchor = clockEnd(b.left);
             holeD = 0f;
+            limit = w - 12 * density;
+            if (top != null && top.left - b.left > anchor) limit = Math.min(limit, top.left - b.left - 7 * density);
         }
-        boolean glass = position != dev.flexy.dynamicisland.Settings.POS_CAMERA && holeD <= 0f && IslandSettings.glassPill();
+        boolean glass = position == dev.flexy.dynamicisland.Settings.POS_LEFT && IslandSettings.glassPill(tablet);
         boolean landscape = w > h;
         if (landscape) cyLandscape = cy;
         else cyPortrait = cy;
-        view.setGeometry(w, cx, cy, holeD, tablet, anchor, glass);
+        view.setGeometry(w, cx, cy, holeD, tablet, anchor, glass, limit);
         applyWindowHeight();
         updateSuppression();
         pushExitTargets(false);

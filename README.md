@@ -17,6 +17,7 @@ Get the ready-made APK from [Releases](../../releases).
 - Swipe left on the capsule to minimize an activity, swipe right to bring it back.
 - Closing an app flies it into the island, using the One UI Home animation.
 - Status bar icons fade out smoothly when the island covers them.
+- Flashlight island: tap the flashlight to switch it on or off, drag along the beam to pick one of the brightness steps or slide to the flashlight to turn it off. The same card replaces the flashlight notification in the shade.
 - Short alerts: Do Not Disturb, sound / vibrate / mute, low battery (20% and 10%) and headphone battery (AirPods via LibrePods, Galaxy Buds, Fast Pair).
 - Live notifications in the shade are styled as dark glass island cards: light text, a thin rim and a solid background when blur is off. App layouts, expansion and actions are kept. Regular notifications and the lock screen keep the system look.
 
@@ -26,7 +27,7 @@ Open the module settings from LSPosed:
 
 - Island length (in characters).
 - Alert toggles: headphone battery (every unlock or only on connect), Do Not Disturb, sound mode, low battery.
-- Island position (foldables and tablets): center, left after the clock (grows only to the right) or around the front camera. Center and left can use a blurred background instead of black.
+- Island position: center or left after the clock (grows only to the right, stops before the camera). Tablets and the inner screen of foldables also get "around the front camera". Foldables have separate settings for the inner and cover screens. The left island can use a blurred background instead of black.
 
 ## Installation
 

@@ -261,6 +261,7 @@ final class ShadeLiveCards {
         float downX;
         float downY;
         boolean tracking;
+        boolean torchTracking;
         boolean moved;
         int desiredHeight;
         final Runnable tick = this::onTick;
@@ -455,11 +456,29 @@ final class ShadeLiveCards {
         @Override
         public boolean onTouchEvent(MotionEvent event) {
             try {
+                if (torchTracking) {
+                    int action = event.getActionMasked();
+                    if (action == MotionEvent.ACTION_MOVE) {
+                        if (renderer.shadeTorchMove(event.getX())) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                        torchTracking = false;
+                        renderer.shadeTorchEnd();
+                    }
+                    postInvalidateOnAnimation();
+                    return true;
+                }
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     downItem = item(key);
                     downX = event.getX();
                     downY = event.getY();
                     moved = false;
+                    if (downItem != null && downItem.torch && renderer.shadeTorchStart(downItem, getWidth(), downX, downY)) {
+                        torchTracking = true;
+                        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                        postInvalidateOnAnimation();
+                        return true;
+                    }
                     tracking = downItem != null && downItem.remoteView == null
                             && renderer.shadeCardHasButton(downItem, getWidth(), downX, downY);
                     if (!tracking) return false;

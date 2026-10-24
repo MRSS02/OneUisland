@@ -70,7 +70,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout island = group(root, "Island");
         slider(island, "Island length", Settings.MAX_CHARS, Settings.MIN_MAX_CHARS, Settings.NO_MAX_CHARS,
                 Settings.DEF_MAX_CHARS, v -> v >= Settings.NO_MAX_CHARS ? "No limit" : v + " chars", Settings.PREVIEW_LENGTH);
-        if (largeScreen()) link(island, "Island position", () -> POSITIONS[position()], () ->
+        link(island, "Island position", this::positionSummary, () ->
                 startActivity(new Intent(this, SettingsActivity.class).putExtra(EXTRA_SCREEN, SCREEN_POSITION)));
 
         gap(root);
@@ -111,14 +111,24 @@ public final class SettingsActivity extends Activity {
         String get();
     }
 
-    private boolean largeScreen() {
-        return getPackageManager().hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE)
-                || getResources().getConfiguration().smallestScreenWidthDp >= 600;
+    private boolean foldable() {
+        return getPackageManager().hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE);
     }
 
-    private int position() {
-        int v = prefs.getInt(Settings.POSITION, Settings.DEF_POSITION);
-        return v >= 0 && v < POSITIONS.length ? v : Settings.DEF_POSITION;
+    private boolean tablet() {
+        return !foldable() && getResources().getConfiguration().smallestScreenWidthDp >= 600;
+    }
+
+    private int position(String key, int count) {
+        int v = prefs.getInt(key, Settings.DEF_POSITION);
+        return v >= 0 && v < count ? v : Settings.DEF_POSITION;
+    }
+
+    private String positionSummary() {
+        String large = POSITIONS[position(Settings.POSITION, 3)];
+        String phone = POSITIONS[position(Settings.POSITION_PHONE, 2)];
+        if (foldable()) return large.equals(phone) ? large : large + " / " + phone;
+        return tablet() ? large : phone;
     }
 
     private void link(LinearLayout group, String name, Text value, Runnable open) {
@@ -139,10 +149,21 @@ public final class SettingsActivity extends Activity {
         TextView title = label("Island position", 30, text, true);
         title.setPadding(dp(8), dp(28), 0, dp(20));
         root.addView(title);
+        if (foldable()) {
+            positionGroup(root, "Inner screen", Settings.POSITION, Settings.GLASS_PILL, 3);
+            gap(root);
+            positionGroup(root, "Cover screen", Settings.POSITION_PHONE, Settings.GLASS_PILL_PHONE, 2);
+        } else if (tablet()) {
+            positionGroup(root, "Position", Settings.POSITION, Settings.GLASS_PILL, 3);
+        } else {
+            positionGroup(root, "Position", Settings.POSITION_PHONE, Settings.GLASS_PILL_PHONE, 2);
+        }
+    }
 
-        LinearLayout place = group(root, "Position");
+    private void positionGroup(LinearLayout root, String name, String key, String glassKey, int count) {
+        LinearLayout place = group(root, name);
         RadioGroup radios = new RadioGroup(this);
-        for (int i = 0; i < POSITIONS.length; i++) {
+        for (int i = 0; i < count; i++) {
             RadioButton b = new RadioButton(this);
             b.setId(View.generateViewId());
             b.setText(POSITIONS[i]);
@@ -154,27 +175,25 @@ public final class SettingsActivity extends Activity {
         }
         radios.setOnCheckedChangeListener((g, id) -> {
             View b = g.findViewById(id);
-            if (b == null || position() == (int) b.getTag()) return;
-            prefs.edit().putInt(Settings.POSITION, (int) b.getTag()).apply();
+            if (b == null || position(key, count) == (int) b.getTag()) return;
+            prefs.edit().putInt(key, (int) b.getTag()).apply();
             preview(g);
             refresh();
         });
         refreshers.add(() -> {
-            View b = radios.getChildAt(position());
+            View b = radios.getChildAt(position(key, count));
             if (b != null && b.getId() != radios.getCheckedRadioButtonId()) radios.check(b.getId());
         });
         place.addView(radios);
 
-        gap(root);
-        LinearLayout look = group(root, "Background");
-        Switch glass = toggle(look, "Blur instead of black", Settings.GLASS_PILL, Settings.DEF_GLASS_PILL);
+        Switch glass = toggle(place, "Blur instead of black", glassKey, Settings.DEF_GLASS_PILL);
         glass.setOnCheckedChangeListener((b, on) -> {
-            if (prefs.getBoolean(Settings.GLASS_PILL, Settings.DEF_GLASS_PILL) == on) return;
-            prefs.edit().putBoolean(Settings.GLASS_PILL, on).apply();
+            if (prefs.getBoolean(glassKey, Settings.DEF_GLASS_PILL) == on) return;
+            prefs.edit().putBoolean(glassKey, on).apply();
             preview(b);
             refresh();
         });
-        refreshers.add(() -> glass.setEnabled(position() != Settings.POS_CAMERA));
+        refreshers.add(() -> glass.setVisibility(position(key, count) == Settings.POS_LEFT ? View.VISIBLE : View.GONE));
     }
 
     private void preview(View anchor) {

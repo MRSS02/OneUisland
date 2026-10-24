@@ -131,6 +131,13 @@ public final class IslandItem {
     public boolean blank;
     public int ringPercent = -1;
 
+    public boolean torch;
+    public boolean torchOn;
+    public int torchLevel = 1;
+    public int torchMax = 1;
+    public Runnable torchToggle;
+    public java.util.function.IntConsumer torchSet;
+
     public long expiresAtUptime;
     public long contentVersion;
 
@@ -165,6 +172,7 @@ public final class IslandItem {
                 && iconIsImage == o.iconIsImage
                 && pulsingDot == o.pulsingDot
                 && pillColor == o.pillColor
+                && torch == o.torch
                 && trailingColor == o.trailingColor
                 && hasTeams() == o.hasTeams();
     }
