@@ -33,6 +33,18 @@ public final class IslandItem {
         WAVEFORM
     }
 
+    public static final class Shortcut {
+        public final CharSequence title;
+        public final android.graphics.Bitmap art;
+        public final Runnable run;
+
+        public Shortcut(CharSequence title, android.graphics.Bitmap art, Runnable run) {
+            this.title = title;
+            this.art = art;
+            this.run = run;
+        }
+    }
+
     public static final class Action {
         public final CharSequence title;
         public final Drawable icon;
@@ -113,6 +125,7 @@ public final class IslandItem {
     public Runnable mediaNext;
     public Runnable mediaOpen;
     public final List<Action> mediaCustom = new ArrayList<>();
+    public final List<Shortcut> mediaShortcuts = new ArrayList<>();
     public Drawable appIcon;
     public android.widget.RemoteViews remoteView;
     public Drawable appGlyph;
@@ -123,6 +136,7 @@ public final class IslandItem {
     public int iconTint;
     public int trailingColor;
     public CharSequence overline;
+    public int overlineColor;
     public Runnable iconTap;
     public int toggle = -1;
     public boolean iconRight;

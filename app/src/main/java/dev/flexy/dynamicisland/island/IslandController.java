@@ -518,7 +518,8 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
             limit = w - 12 * density;
             if (top != null && top.left - b.left > anchor) limit = Math.min(limit, top.left - b.left - 7 * density);
         }
-        boolean glass = position == dev.flexy.dynamicisland.Settings.POS_LEFT && IslandSettings.glassPill(tablet);
+        boolean glass = (position == dev.flexy.dynamicisland.Settings.POS_LEFT
+                || (tablet && position == dev.flexy.dynamicisland.Settings.POS_CENTER)) && IslandSettings.glassPill(tablet);
         boolean landscape = w > h;
         if (landscape) cyLandscape = cy;
         else cyPortrait = cy;

@@ -76,7 +76,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
         void beginFrame();
 
-        void place(Object owner, RectF bounds, float corner, float alpha);
+        void place(Object owner, RectF bounds, float corner, float alpha, int radius);
 
         void endFrame();
 
@@ -93,7 +93,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private static final long IN_MS = 200;
     private static final long IN_DELAY_MS = 115;
     private static final long ROW_STAGGER_MS = 30;
-    private static final long CARD_STAGGER_MS = 70;
+    private static final long CARD_STAGGER_MS = 40;
     private static final int MAX_CARDS = 4;
 
     private final Host host;
@@ -145,6 +145,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private final Spring offsetX;
     private final Spring split;
     private final Spring[] waveBars = new Spring[4];
+    private final Spring bubbleExtra = new Spring(0f, 0.36f, 0.82f).setValueThreshold(0.3f);
     private final float[] waveLevel = new float[4];
     private float shade;
     private long lastFrameNanos;
@@ -203,6 +204,15 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         float a = Math.abs(d);
         float r = limit * (1f - 1f / (a * 0.55f / limit + 1f));
         return Math.signum(d) * r;
+    }
+
+    private android.view.VelocityTracker tracker;
+    private float flingBoost;
+
+    private float flingVelocity() {
+        if (tracker == null) return 0f;
+        tracker.computeCurrentVelocity(1000);
+        return tracker.getYVelocity();
     }
 
     private void releaseStack() {
@@ -477,7 +487,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private boolean bubbleFits(IslandItem main) {
         if (main == null || Float.isNaN(anchorLeft) || Float.isNaN(rightLimit)) return true;
         float w = new CompactContent(main).desiredWidth();
-        return anchorLeft + w + bubbleGap + bubbleR * 2f <= rightLimit;
+        return anchorLeft + w + bubbleGap + bubbleR * 2f + Math.max(0f, bubbleExtra.target()) <= rightLimit;
     }
 
     private void refreshLimit() {
@@ -700,7 +710,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     public boolean needsAudio() {
         if (mode != Mode.COMPACT || mainIn == null || visibleAlpha() < 0.2f) return false;
         IslandItem it = mainIn.content.item;
-        return it.trailing == IslandItem.Trailing.WAVEFORM && it.playing;
+        if (it.trailing == IslandItem.Trailing.WAVEFORM && it.playing) return true;
+        IslandItem b = detailedBubbleItem();
+        return b != null && b.trailing == IslandItem.Trailing.WAVEFORM && b.playing;
     }
 
     public void getCoverageBounds(RectF out) {
@@ -770,6 +782,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             return;
         }
         mode = Mode.COMPACT;
+        bubbleHoldUntil = now() + 420 + POP_DELAY_MS;
         collapseCards(true);
         replaceMain(new CompactContent(primary), true, 0, 0);
         mainIn = Layer.incoming(mainIn.content, now(), 330);
@@ -787,7 +800,21 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         if (mode != Mode.COMPACT || mainIn == null) return;
         width.animateTo(mainIn.content.desiredWidth(), 0.38f, 0.7f);
         height.animateTo(pillH, 0.34f, 0.75f);
-        split.animateTo(secondary != null ? 1f : 0f, 0.46f, 0.6f);
+        removeCallbacks(popBubble);
+        if (secondary != null) postDelayed(popBubble, POP_DELAY_MS);
+        else split.animateTo(0f, 0.46f, 0.6f);
+        scheduleFrame();
+    }
+
+    private static final double BEAM_ANGLE = Math.toRadians(28);
+    private static final long POP_DELAY_MS = 170;
+    private static final long MERGE_MS = 150;
+    private long bubbleHoldUntil;
+    private final Runnable popBubble = this::popBubbleNow;
+
+    private void popBubbleNow() {
+        if (mode != Mode.COMPACT || secondary == null) return;
+        split.animateTo(1f, 0.42f, 0.56f);
         scheduleFrame();
     }
 
@@ -801,7 +828,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     private float restWidth() {
-        return holeD > 0 ? holeD * 0.92f : pillH * 0.45f;
+        return holeD > 0 ? holeD * 0.92f : 0f;
     }
 
     private void appear(IslandItem p, boolean fromLeft) {
@@ -887,12 +914,21 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private void expand(List<IslandItem> show) {
         if (show.isEmpty()) return;
         boolean wasExpanded = mode == Mode.EXPANDED;
+        long merge = !wasExpanded && split.value() > 0.05f ? MERGE_MS : 0;
         mode = Mode.EXPANDED;
+        removeCallbacks(popBubble);
         layoutCards(show, true);
+        if (merge > 0) {
+            for (Card c : cards) {
+                if (c.leaving) continue;
+                c.startAt += merge;
+                c.contentStart += merge;
+            }
+        }
         width.animateTo(restWidth(), 0.34f, 0.86f);
         height.animateTo(Math.min(restWidth(), pillH), 0.34f, 0.86f);
         if (mainIn != null) mainOut = mainIn.toOutgoing(now(), 0);
-        split.animateTo(0f, 0.3f, 0.9f);
+        split.animateTo(0f, merge > 0 ? 0.24f : 0.3f, 0.92f);
         offsetX.animateTo(0f);
         removeCallbacks(fadePillBlob);
         postDelayed(fadePillBlob, 260);
@@ -926,7 +962,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 c.w.snapTo(pillH * 1.8f);
                 c.h.snapTo(pillH * 0.8f);
                 c.startAt = t + (animateFromPill ? newIndex * CARD_STAGGER_MS : 0);
-                c.contentStart = c.startAt + 230;
+                c.contentStart = c.startAt + 200;
                 newIndex++;
             } else {
                 c.item = it;
@@ -1041,7 +1077,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         } else {
             bubbleIn = Layer.shownLike(new BubbleContent(s), bubbleIn);
         }
-        if (mode == Mode.COMPACT) split.animateTo(1f, 0.46f, 0.6f);
+        if (mode == Mode.COMPACT && now() >= bubbleHoldUntil) split.animateTo(1f, 0.46f, 0.6f);
     }
 
     private void bump() {
@@ -1085,6 +1121,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         active |= pulse.step(dt);
         active |= offsetX.step(dt);
         active |= split.step(dt);
+        active |= stepBubbleExtra(dt);
         active |= pillBlob.step(dt);
         active |= stackDx.step(dt);
         active |= stackDy.step(dt);
@@ -1128,14 +1165,15 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             if (!c.launched && t >= (c.leaving ? c.leaveAt : c.startAt)) {
                 c.launched = true;
                 if (c.leaving) {
-                    float speed = 1f - Math.min(0.3f, 0.1f * c.order);
+                    float speed = (1f - Math.min(0.3f, 0.1f * c.order)) * (1f - 0.4f * flingBoost);
                     c.cy.animateTo(c.targetCy, 0.40f * speed, 0.9f);
                     c.w.animateTo(c.targetW, 0.30f * speed, 0.92f);
                     c.h.animateTo(c.targetH, 0.34f * speed, 0.9f);
+                    if (flingBoost > 0f) c.cy.impulse(-dp(1400) * flingBoost);
                 } else {
-                    c.cy.animateTo(c.targetCy, 0.46f, 0.74f);
-                    c.w.animateTo(c.targetW, 0.40f, 0.76f);
-                    c.h.animateTo(c.targetH, 0.48f, 0.78f);
+                    c.cy.animateTo(c.targetCy, 0.42f, 0.7f);
+                    c.w.animateTo(c.targetW, 0.36f, 0.72f);
+                    c.h.animateTo(c.targetH, 0.44f, 0.74f);
                 }
             }
             active |= !c.launched;
@@ -1156,7 +1194,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             if (mode == Mode.COMPACT) {
                 removeCallbacks(regrowPill);
                 regrowPillNow();
-                pulse.impulse(1.4f);
+                pulse.impulse(1.4f + 3.2f * flingBoost);
+                if (flingBoost > 0f) height.impulse(-dp(60) * flingBoost);
+                flingBoost = 0f;
             }
         }
         return active;
@@ -1168,22 +1208,23 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         float vis = visibleAlpha();
         if (vis > 0.003f) {
             for (Card c : cards) {
+                if (!c.leaving && !c.launched) continue;
                 computeCard(c, cardRect);
                 if (cardRect.width() < 1f || cardRect.height() < 1f) continue;
-                blur.place(c, cardRect, Math.min(cardRect.height() / 2f, cardRadius), vis);
+                blur.place(c, cardRect, Math.min(cardRect.height() / 2f, cardRadius), vis, frostOn() ? FROST_BLUR : 0);
             }
             if (glassActive()) {
                 computeMain(blurRect);
                 float a = vis * pillBlob.value();
                 if (blurRect.width() > 2f && blurRect.height() > 2f) {
                     scaleAroundPill(blurRect, blurRect);
-                    blur.place(PILL_BLUR, blurRect, blurRect.height() / 2f, a);
+                    blur.place(PILL_BLUR, blurRect, blurRect.height() / 2f, a, 0);
                 }
-                if (split.value() > 0.003f && mode != Mode.EXPANDED) {
+                if (split.value() > 0.003f) {
                     computeMain(tmpBlur);
                     computeBubble(tmpBlur, blurRect);
                     scaleAroundPill(tmpBlur, blurRect);
-                    blur.place(BUBBLE_BLUR, blurRect, blurRect.width() / 2f, a);
+                    blur.place(BUBBLE_BLUR, blurRect, blurRect.height() / 2f, a, 0);
                 }
             }
         }
@@ -1216,6 +1257,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             if (it.trailing == IslandItem.Trailing.WAVEFORM) waveItem = it;
             need |= it.pulsingDot;
         }
+        IslandItem detailed = detailedBubbleItem();
+        if (waveItem == null && detailed != null && detailed.trailing == IslandItem.Trailing.WAVEFORM) waveItem = detailed;
         if (mainIn != null) need |= runningStopwatch(mainIn.content.item);
         need |= now() < rollUntil;
         need |= toggleAnimating();
@@ -1266,6 +1309,20 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     private static final int[] BAND_ORDER = {2, 0, 1, 3};
 
+    private IslandItem detailedBubbleItem() {
+        if (mode != Mode.COMPACT || bubbleIn == null || !IslandSettings.detailedBubble()) return null;
+        return bubbleIn.content.item;
+    }
+
+    private boolean stepBubbleExtra(float dt) {
+        float target = 0f;
+        if (mode == Mode.COMPACT && bubbleIn != null && bubbleIn.content instanceof BubbleContent) {
+            target = ((BubbleContent) bubbleIn.content).extra();
+        }
+        if (Math.abs(bubbleExtra.target() - target) > 0.5f) bubbleExtra.animateTo(target, 0.36f, 0.82f);
+        return bubbleExtra.step(dt);
+    }
+
     private void onSecondTick() {
         tickPosted = false;
         if (frozenByShade()) {
@@ -1273,6 +1330,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             return;
         }
         updateBlur();
+        if (detailedBubbleItem() != null) scheduleFrame();
         if (mode == Mode.COMPACT && mainIn != null && mainIn.content instanceof CompactContent) {
             CompactContent cc = (CompactContent) mainIn.content;
             if (cc.item.trailing == IslandItem.Trailing.CHRONOMETER && cc.remeasure()) {
@@ -1406,7 +1464,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     private static boolean runningStopwatch(IslandItem item) {
-        return item.chronoMillis && item.trailing == IslandItem.Trailing.CHRONOMETER;
+        return item.chronoMillis && item.trailing == IslandItem.Trailing.CHRONOMETER
+                && System.currentTimeMillis() - item.chronoBase < 3_600_000L;
     }
 
     private IslandItem tickingChronometer() {
@@ -1418,6 +1477,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private boolean needsTicks() {
         if (mode == Mode.HIDDEN || !isAttachedToWindow()) return false;
         if (mainIn != null && mainIn.content.item.trailing == IslandItem.Trailing.CHRONOMETER) return true;
+        IslandItem detailed = detailedBubbleItem();
+        if (detailed != null && (detailed.trailing == IslandItem.Trailing.CHRONOMETER || detailed.progress >= 0)) return true;
         for (Card c : cards) {
             if (c.item.trailing == IslandItem.Trailing.CHRONOMETER || hasRunningMetric(c.item)) return true;
             if (c.item.isMedia && c.item.playing) return true;
@@ -1467,7 +1528,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         float br = lerp(r1 * 0.72f, bubbleR, clamp01(s));
         float rest = r1 + bubbleGap + bubbleR;
         float bx = c1x + rest * s;
-        out.set(bx - br, c1y - br, bx + br, c1y + br);
+        float extra = Math.max(0f, bubbleExtra.value()) * clamp01(s);
+        out.set(bx - br, c1y - br, bx + br + extra, c1y + br);
     }
 
     private void computeCard(Card c, RectF out) {
@@ -1530,13 +1592,13 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private void drawPillAndBubble(Canvas canvas, long t) {
         float r = mainRect.height() / 2f;
         float s = split.value();
-        boolean hasBubble = s > 0.003f && mode != Mode.EXPANDED;
+        boolean hasBubble = s > 0.003f;
         float bx = 0, by = 0, br = 0, r1 = 0, c1x = 0, c1y = 0;
         boolean hasNeck = false;
         if (hasBubble) {
             computeBubble(mainRect, bubbleRect);
-            br = bubbleRect.width() / 2f;
-            bx = bubbleRect.centerX();
+            br = bubbleRect.height() / 2f;
+            bx = bubbleRect.left + br;
             by = bubbleRect.centerY();
             r1 = r;
             c1x = mainRect.right - r1;
@@ -1555,8 +1617,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             computeCard(first, cardRect);
             float gapToPill = cardRect.top - mainRect.bottom;
             float p = expansion(first);
-            float spread = 0.6f * (1f - clamp01(gapToPill / dp(26))) * (1f - p);
-            if (spread > 0.02f) {
+            float spread = 0.6f * (1f - clamp01(gapToPill / dp(16))) * (1f - p);
+            if (spread > 0.14f) {
                 float ra = Math.max(mainRect.height(), mainRect.width()) / 2f;
                 float rb = Math.min(Math.min(cardRect.height(), cardRect.width()) / 2f, dp(24));
                 neckPathCard.reset();
@@ -1576,7 +1638,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 canvas.drawRoundRect(tmpRect, r + o, r + o, outlinePaint);
             }
             if (hasBubble) {
-                canvas.drawCircle(bx, by, br + o, outlinePaint);
+                tmpRect.set(bubbleRect);
+                tmpRect.inset(-o, -o);
+                canvas.drawRoundRect(tmpRect, br + o, br + o, outlinePaint);
                 if (hasNeck) {
                     outlinePaint.setStyle(Paint.Style.FILL_AND_STROKE);
                     outlinePaint.setStrokeWidth(o * 2f);
@@ -1597,7 +1661,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             shapePaint.setColor(mainColor);
             if (hasNeck) canvas.drawPath(neckPath, shapePaint);
             shapePaint.setColor(glass ? GLASS_COLOR : bodyColor(bubbleIn));
-            canvas.drawCircle(bx, by, br, shapePaint);
+            canvas.drawRoundRect(bubbleRect, br, br, shapePaint);
         }
         shapePaint.setColor(BODY_BLACK);
         if (glass) {
@@ -1610,9 +1674,10 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 canvas.drawRoundRect(tmpRect, r, r, cardStroke);
             }
             if (hasBubble) {
-                tmpRect.set(bx - br, by - br, bx + br, by + br);
+                tmpRect.set(bubbleRect);
                 cardStroke.setShader(rimShader(tmpRect, rimA));
-                canvas.drawCircle(bx, by, br - outlineW / 2f, cardStroke);
+                tmpRect.inset(outlineW / 2f, outlineW / 2f);
+                canvas.drawRoundRect(tmpRect, br - outlineW / 2f, br - outlineW / 2f, cardStroke);
             }
         }
 
@@ -1657,9 +1722,123 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         return rim;
     }
 
+    private android.graphics.LinearGradient frostShade;
+    private float frostTop = Float.NaN;
+    private float frostH = -1f;
+    private float frostAlpha = -1f;
+
+    private android.graphics.Shader frostShade(RectF r, float alpha) {
+        if (frostShade == null || Math.abs(frostH - r.height()) > 1f || Math.abs(frostTop - r.top) > 1f || Math.abs(frostAlpha - alpha) > 0.02f) {
+            frostH = r.height();
+            frostTop = r.top;
+            frostAlpha = alpha;
+            float end = r.top + r.height() * 0.9f;
+            int[] colors = new int[FROST_STOPS];
+            float[] stops = new float[FROST_STOPS];
+            for (int i = 0; i < FROST_STOPS; i++) {
+                float f = i / (float) (FROST_STOPS - 1);
+                stops[i] = f;
+                float k = clamp01((f - 0.2f) / 0.8f);
+                float e = k * k * k * (k * (k * 6f - 15f) + 10f);
+                colors[i] = Colors.withAlpha(0xFF000000, alpha * 0.73f * (1f - e));
+            }
+            frostShade = new android.graphics.LinearGradient(0, r.top, 0, end, colors, stops, android.graphics.Shader.TileMode.CLAMP);
+        }
+        return frostShade;
+    }
+
+    private final java.util.HashMap<Long, android.graphics.Bitmap> topShadows = new java.util.HashMap<>();
+    private final Paint topShadowPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final android.graphics.Rect shadowSrc = new android.graphics.Rect();
+    private final RectF shadowDst = new RectF();
+
+    private android.graphics.Bitmap topShadow(float radius, int depth, boolean wrap) {
+        int r = Math.round(radius);
+        long key = (long) r << 33 | (long) depth << 1 | (wrap ? 1 : 0);
+        android.graphics.Bitmap cached = topShadows.get(key);
+        if (cached != null) return cached;
+        if (topShadows.size() > 8) topShadows.clear();
+        float dy = dp(3);
+        float blurR = Math.max(dp(8), (depth - dy) / 2.6f);
+        float ex = dp(14);
+        float bend = wrap ? 1.7f : 1f;
+        float hole = r * bend + ex;
+        int half = Math.round(r * bend + dp(6));
+        int bw = half * 2 + 1;
+        int bh = Math.round(dy + hole + blurR * 4f);
+        android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ALPHA_8);
+        Canvas cv = new Canvas(b);
+        Path clip = new Path();
+        clip.addRoundRect(0, 0, bw, bh + r * 2f, r, r, Path.Direction.CW);
+        cv.clipPath(clip);
+        Path shape = new Path();
+        shape.setFillType(Path.FillType.EVEN_ODD);
+        shape.addRect(-bw, -bh, bw * 2f, bh * 3f, Path.Direction.CW);
+        shape.addRoundRect(-ex, dy, bw + ex, bh * 3f, hole, hole, Path.Direction.CW);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFF000000);
+        p.setMaskFilter(new BlurMaskFilter(blurR, BlurMaskFilter.Blur.NORMAL));
+        cv.drawPath(shape, p);
+        topShadows.put(key, b);
+        return b;
+    }
+
+    private void drawBottomGlow(Canvas canvas, RectF card, float r, float fullH, float alpha) {
+        int save = canvas.save();
+        canvas.scale(1f, -1f, card.centerX(), card.centerY());
+        drawEdgeShade(canvas, card, r, fullH * 0.22f, false, 0xFFFFFFFF, alpha * FROST_GLOW);
+        canvas.restoreToCount(save);
+    }
+
+    private final Paint bottomRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private void drawBottomRim(Canvas canvas, RectF card, float r, float alpha) {
+        float w = dp(1.3f);
+        bottomRim.setStyle(Paint.Style.STROKE);
+        bottomRim.setStrokeWidth(w);
+        float top = card.top + card.height() * 0.45f;
+        bottomRim.setShader(new LinearGradient(0, top, 0, card.bottom,
+                new int[] {0x00FFFFFF, Colors.withAlpha(0xFFFFFFFF, alpha * 0.07f), Colors.withAlpha(0xFFFFFFFF, alpha * 0.24f)},
+                new float[] {0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
+        tmpRect.set(card);
+        tmpRect.inset(w / 2f, w / 2f);
+        canvas.drawRoundRect(tmpRect, r - w / 2f, r - w / 2f, bottomRim);
+        bottomRim.setShader(null);
+    }
+
+    private void drawTopShadow(Canvas canvas, RectF card, float r, float fullH, float alpha) {
+        drawEdgeShade(canvas, card, r, fullH * 0.6f, true, 0xFF000000, alpha * FROST_SHADOW);
+    }
+
+    private void drawEdgeShade(Canvas canvas, RectF card, float r, float reach, boolean wrap, int color, float alpha) {
+        int step = Math.max(1, Math.round(dp(6)));
+        int depth = Math.max(step, Math.round(reach / step) * step);
+        android.graphics.Bitmap b = topShadow(r, depth, wrap);
+        int bw = b.getWidth();
+        int bh = b.getHeight();
+        int half = bw / 2;
+        if (card.width() < bw) return;
+        int save = canvas.save();
+        clipPath.reset();
+        clipPath.addRoundRect(card, r, r, Path.Direction.CW);
+        canvas.clipPath(clipPath);
+        topShadowPaint.setColor(Colors.withAlpha(color, alpha));
+        shadowSrc.set(0, 0, half, bh);
+        shadowDst.set(card.left, card.top, card.left + half, card.top + bh);
+        canvas.drawBitmap(b, shadowSrc, shadowDst, topShadowPaint);
+        shadowSrc.set(half, 0, half + 1, bh);
+        shadowDst.set(card.left + half, card.top, card.right - half, card.top + bh);
+        canvas.drawBitmap(b, shadowSrc, shadowDst, topShadowPaint);
+        shadowSrc.set(bw - half, 0, bw, bh);
+        shadowDst.set(card.right - half, card.top, card.right, card.top + bh);
+        canvas.drawBitmap(b, shadowSrc, shadowDst, topShadowPaint);
+        canvas.restoreToCount(save);
+    }
+
     private Card firstOpeningCard() {
         Card best = null;
         for (Card c : cards) {
+            if (!c.leaving && !c.launched) continue;
             if (best == null || c.cy.value() < best.cy.value()) best = c;
         }
         return best;
@@ -1709,10 +1888,21 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private void drawCardInner(Canvas canvas, Card c, long t, float p) {
         float r = Math.min(cardRect.height() / 2f, cardRadius);
         boolean glass = blur != null && blur.available();
+        boolean frost = glass && IslandSettings.frostedCards();
         float g = clamp01((p - 0.82f) / 0.18f);
-        float tint = lerp(1f, glass ? 0.46f : 0.9f, g);
+        float tint = lerp(1f, glass ? (frost ? FROST_TINT : 0.46f) : 0.9f, g);
         cardPaint.setColor(Colors.withAlpha(glass ? 0xFF0E0E10 : 0xFF141416, tint));
         canvas.drawRoundRect(cardRect, r, r, cardPaint);
+        if (frost && g > 0.003f) {
+            cardPaint.setColor(0xFF000000);
+            cardPaint.setDither(true);
+            cardPaint.setShader(frostShade(cardRect, g));
+            canvas.drawRoundRect(cardRect, r, r, cardPaint);
+            cardPaint.setShader(null);
+            drawTopShadow(canvas, cardRect, r, c.body.h, g);
+            drawBottomGlow(canvas, cardRect, r, c.body.h, g);
+            drawBottomRim(canvas, cardRect, r, g);
+        }
         cardStroke.setShader(rimShader(cardRect, 0.4f + 0.6f * p));
         tmpRect.set(cardRect);
         tmpRect.inset(outlineW / 2f, outlineW / 2f);
@@ -2213,8 +2403,55 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             return bubbleR * 2;
         }
 
+        float extra() {
+            if (!IslandSettings.detailedBubble()) return 0f;
+            if (item.isMedia) return item.trailing == IslandItem.Trailing.WAVEFORM ? miniWaveWidth() + dp(5) : 0f;
+            String s = detailText();
+            return s == null ? 0f : bubbleTextPaint().measureText(s) + dp(6);
+        }
+
+        String detailText() {
+            if (item.isMedia || item.recorder || item.hasTeams()) return null;
+            if (item.progress >= 0) return String.valueOf(Math.round(clamp01(item.progress) * 100f));
+            long ms;
+            if (item.pausedMs >= 0) {
+                ms = item.pausedMs;
+            } else if (item.trailing == IslandItem.Trailing.CHRONOMETER) {
+                long now = System.currentTimeMillis();
+                ms = item.chronoCountDown ? item.chronoBase - now : now - item.chronoBase;
+            } else {
+                return null;
+            }
+            return shortDuration(Math.max(0, ms));
+        }
+
         @Override
         void draw(Canvas c, RectF b, float alpha, long elapsedIn) {
+            float extra = b.width() - b.height();
+            if (extra < dp(4) || !IslandSettings.detailedBubble()) {
+                drawCore(c, b, alpha);
+                return;
+            }
+            bubbleCore.set(b.left, b.top, b.left + b.height(), b.bottom);
+            drawCore(c, bubbleCore, alpha);
+            float x = bubbleCore.right - dp(2);
+            float midY = b.centerY();
+            if (item.isMedia) {
+                float a = alpha * clamp01((extra - dp(6)) / dp(14));
+                drawMiniWave(c, item, x, midY, b.height() * 0.46f, a);
+                return;
+            }
+            String s = detailText();
+            if (s == null) return;
+            TextPaint p = bubbleTextPaint();
+            float tw = p.measureText(s);
+            int tc = item.trailingColor != 0 ? item.trailingColor : 0xFFFFFFFF;
+            p.setColor(Colors.withAlpha(tc, alpha * clamp01((extra - dp(4)) / Math.max(1f, tw))));
+            Paint.FontMetrics fm = p.getFontMetrics();
+            c.drawText(s, x, midY - (fm.ascent + fm.descent) / 2f, p);
+        }
+
+        private void drawCore(Canvas c, RectF b, float alpha) {
             float size = b.width() * 0.56f;
             if (item.progress >= 0 && !item.isMedia) {
                 drawRing(c, b.centerX(), b.centerY(), b.width() / 2f - dp(2.5f), item.progress,
@@ -2235,6 +2472,50 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         }
     }
 
+
+    private final RectF bubbleCore = new RectF();
+    private TextPaint bubbleText;
+
+    private TextPaint bubbleTextPaint() {
+        if (bubbleText == null) {
+            bubbleText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            bubbleText.setTypeface(Fonts.of(600));
+            bubbleText.setTextSize(sp(13.5f));
+            bubbleText.setFontFeatureSettings("tnum");
+        }
+        return bubbleText;
+    }
+
+    private static String shortDuration(long ms) {
+        long s = ms / 1000;
+        if (s < 60) return s + "s";
+        long m = s / 60;
+        if (m < 60) return m + "m";
+        return Math.min(99, m / 60) + "h";
+    }
+
+    private float miniWaveWidth() {
+        return waveBars.length * dp(2.4f) + (waveBars.length - 1) * dp(1.8f);
+    }
+
+    private void drawMiniWave(Canvas c, IslandItem item, float left, float midY, float maxH, float alpha) {
+        if (alpha <= 0.003f) return;
+        float bw = dp(2.4f);
+        float gap = dp(1.8f);
+        float minH = dp(3f);
+        float right = left + miniWaveWidth();
+        int barColor = mediaFx(item).accent(now());
+        fillPaint.setColor(Colors.withAlpha(0xFFFFFFFF, alpha));
+        fillPaint.setShader(waveShader(barColor, left, right));
+        float x = left;
+        for (Spring bar : waveBars) {
+            float h = minH + (maxH - minH) * clamp01(bar.value());
+            tmpRect.set(x, midY - h / 2f, x + bw, midY + h / 2f);
+            c.drawRoundRect(tmpRect, bw / 2f, bw / 2f, fillPaint);
+            x += bw + gap;
+        }
+        fillPaint.setShader(null);
+    }
 
     private final class Card {
         IslandItem item;
@@ -2443,8 +2724,24 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         String label;
         int bg;
         boolean circle;
+        boolean tile;
         Runnable run;
         IslandItem.Action action;
+    }
+
+    private static final int FROST_BUTTON = 0x38FFFFFF;
+    private static final float FROST_TINT = 0.03f;
+    private static final int FROST_STOPS = 33;
+    private static final int FROST_BLUR = 34;
+    private static final float FROST_SHADOW = 0.85f;
+    private static final float FROST_GLOW = 0.2f;
+
+    private boolean frostOn() {
+        return blur != null && blur.available() && IslandSettings.frostedCards();
+    }
+
+    private int frostBg(Btn b) {
+        return b.bg == 0xFF3A3A3C && frostOn() ? FROST_BUTTON : b.bg;
     }
 
     private abstract class CardBody {
@@ -2481,7 +2778,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 float pr = pressOf(b, item);
                 int save = c.save();
                 if (pr != 0f) {
-                    if (pr > 0f) {
+                    if (pr > 0f && !b.tile) {
                         boolean filled = b.circle && (b.bg >>> 24) > 0x20;
                         float rad = Math.max(tmpRect.width(), tmpRect.height()) / 2f + (filled ? dp(5) : b.circle ? 0f : dp(10));
                         fillPaint.setColor(Colors.withAlpha(0xFFFFFFFF, alpha * (filled ? 0.22f : 0.16f) * Math.min(1f, pr)));
@@ -2498,7 +2795,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         }
 
         private void drawSplash(Canvas c, Btn b, RectF r, float alpha) {
-            if (pressedKey == null || !pressedKey.equals(item.key)) return;
+            if (b.tile || pressedKey == null || !pressedKey.equals(item.key)) return;
             if (Math.abs(b.r.centerX() - pressedBtn.centerX()) > 1f || Math.abs(b.r.centerY() - pressedBtn.centerY()) > 1f) return;
             boolean wide = !b.circle && b.glyph == 0;
             float t = (now() - btnDownAt) / (float) (wide ? SPLASH_WIDE_MS : SPLASH_MS);
@@ -2535,8 +2832,16 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
         private void drawButton(Canvas c, Btn b, float alpha) {
             {
-                if (b.circle) {
-                    fillPaint.setColor(Colors.withAlpha(b.bg, alpha));
+                if (b.tile) {
+                    float corner = dp(12);
+                    if (b.icon != null) {
+                        drawDrawable(c, b.icon, true, 0, tmpRect.left, tmpRect.top, tmpRect.width(), alpha, corner);
+                    } else {
+                        fillPaint.setColor(Colors.withAlpha(0x2EFFFFFF, alpha));
+                        c.drawRoundRect(tmpRect, corner, corner, fillPaint);
+                    }
+                } else if (b.circle) {
+                    fillPaint.setColor(Colors.withAlpha(frostBg(b), alpha));
                     c.drawOval(tmpRect, fillPaint);
                     float gs = tmpRect.height() * (b.bg == 0x00FFFFFF ? 0.6f : 0.44f);
                     if (b.glyph != 0) {
@@ -2553,7 +2858,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     fillPaint.setColor(Colors.withAlpha(0xFFFFFFFF, alpha));
                     Glyphs.draw(c, b.glyph, tmpRect.centerX(), tmpRect.centerY(), tmpRect.height() * 0.5f, fillPaint);
                 } else {
-                    fillPaint.setColor(Colors.withAlpha(b.bg, alpha));
+                    fillPaint.setColor(Colors.withAlpha(frostBg(b), alpha));
                     c.drawRoundRect(tmpRect, tmpRect.height() / 2f, tmpRect.height() / 2f, fillPaint);
                     if (b.label != null) drawLabel(c, b.label, tmpRect, alpha);
                     else if (b.icon != null) {
@@ -2842,7 +3147,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             float subH = subtitle == null ? 0f : dp(2) + subtitle.getHeight();
             float top = midY - (titleH + overH + subH) / 2f;
             if (overline != null) {
-                bodyPaint.setColor(Colors.withAlpha(0x99FFFFFF, a0));
+                bodyPaint.setColor(Colors.withAlpha(item.overlineColor != 0 ? item.overlineColor : 0x99FFFFFF, a0));
                 c.drawText(overline, tx, top - bf.ascent, bodyPaint);
             }
             if (title != null) {
@@ -3739,21 +4044,21 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             if (seekPhase > TWO_PI) seekPhase -= TWO_PI;
         }
 
-        void drawGlow(Canvas c, float x, float y, float w, float h, float alpha, long now) {
+        void drawGlow(Canvas c, float x, float y, float w, float h, float glowH, float alpha, long now) {
             int tone = accent(now);
-            if (setTo.h != h || setTo.accent != tone) setTo.build(tone, h);
+            if (setTo.h != glowH || setTo.accent != tone) setTo.build(tone, glowH);
             float a = alpha * glow.value(now);
             c.save();
             c.translate(x, y);
-            drawLayer(c, setTo, w, h, a);
+            drawLayer(c, setTo, w, glowH, h, a);
             c.restore();
         }
 
-        private void drawLayer(Canvas c, ToneSet set, float w, float h, float alpha) {
+        private void drawLayer(Canvas c, ToneSet set, float w, float h, float bottom, float alpha) {
             if (alpha <= 0.002f) return;
             basePaint.setShader(set.base);
             basePaint.setAlpha(Math.round(255f * alpha));
-            c.drawRect(0, h * 0.40f, w, h, basePaint);
+            c.drawRect(0, h * 0.40f, w, Math.max(h, bottom), basePaint);
             for (int i = 0; i < 3; i++) {
                 float ph = phase[i];
                 float cx = w * (GLOW_LANE[i] + 0.12f * (float) Math.sin(ph));
@@ -3858,9 +4163,31 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         final float controlH = dp(52);
         float barLeft;
         float barRight;
+        float playerH;
 
         private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF tmpRect2 = new RectF();
+
+        private final Paint beamPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path beamPath = new Path();
+
+        private void drawBeam(Canvas c, float hx, float hy, float bh, float barL, float alpha, int color) {
+            if (alpha <= 0.01f) return;
+            if (beamPaint.getMaskFilter() == null) beamPaint.setMaskFilter(new BlurMaskFilter(dp(6f), BlurMaskFilter.Blur.NORMAL));
+            float len = Math.min(dp(130), Math.max(dp(30), hx - barL + dp(6)));
+            float drop = Math.min(dp(30), len * 0.34f);
+            beamPath.rewind();
+            beamPath.moveTo(hx, hy - bh * 0.5f);
+            beamPath.lineTo(hx - len, hy - drop * 0.75f);
+            beamPath.lineTo(hx - len, hy + drop);
+            beamPath.lineTo(hx, hy + bh * 0.6f);
+            beamPath.close();
+            beamPaint.setShader(new LinearGradient(hx, hy, hx - len, hy + drop * 0.1f,
+                    new int[] {Colors.withAlpha(color, alpha * 0.55f), Colors.withAlpha(color, alpha * 0.2f), Colors.withAlpha(color, 0f)},
+                    new float[] {0f, 0.4f, 1f}, Shader.TileMode.CLAMP));
+            c.drawPath(beamPath, beamPaint);
+            beamPaint.setShader(null);
+        }
 
         boolean onSeekBar(float lx, float ly) {
             float sy = seekTop + dp(7);
@@ -3890,6 +4217,24 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             addControl(Glyphs.NEXT, pad + span * 0.70f, item.mediaNext, false);
             if (item.mediaCustom.size() > 1) addCustom(item.mediaCustom.get(1), pad + span * 0.92f);
             h = controlsTop + controlH + dp(14);
+            playerH = h;
+            int n = Math.min(4, item.mediaShortcuts.size());
+            if (n > 0) {
+                float gap = dp(10);
+                float side = (span - gap * 3) / 4f;
+                float top = controlsTop + controlH + dp(10);
+                for (int i = 0; i < n; i++) {
+                    IslandItem.Shortcut sc = item.mediaShortcuts.get(i);
+                    Btn b = new Btn();
+                    b.tile = true;
+                    b.icon = sc.art == null ? null : new android.graphics.drawable.BitmapDrawable(getResources(), sc.art);
+                    b.run = sc.run;
+                    float l = pad + i * (side + gap);
+                    b.r.set(l, top, l + side, top + side);
+                    buttons.add(b);
+                }
+                h = top + side + pad;
+            }
         }
 
         private void addControl(int glyph, float centerX, Runnable r, boolean circle) {
@@ -3920,7 +4265,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             long nowT = now();
             MediaFx fx = mediaFx(item);
             fx.advance(nowT);
-            fx.drawGlow(c, x, y, w, h, alpha, nowT);
+            fx.drawGlow(c, x, y, w, h, playerH, alpha, nowT);
             float r0 = rowAlpha(el, 0);
             float a0 = alpha * r0;
             float dy0 = (1f - r0) * dp(8);
@@ -3979,13 +4324,15 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             tmpRect.right = barL + Math.max(bh * 2.4f, (barR - barL) * p);
             float head = tmpRect.right;
             float glowA = a1 * (0.8f + fx.liveness(nowT) * (0.05f + 0.15f * (float) Math.sin(fx.seekPhase)));
-            glowPaint.setColor(Colors.withAlpha(0xFFFFFFFF, glowA * 0.45f));
-            tmpRect2.set(Math.max(barL, head - dp(70)), sy - bh / 2f, head, sy + bh / 2f);
-            c.drawRoundRect(tmpRect2, bh / 2f, bh / 2f, glowPaint);
-            glowPaint.setColor(Colors.withAlpha(0xFFFFFFFF, glowA * 0.9f));
-            c.drawCircle(head - bh * 0.6f, sy, bh * 0.95f, glowPaint);
-            fillPaint.setColor(Colors.withAlpha(0xF2FFFFFF, a1));
+            int tint = Colors.blend(fx.accent(nowT), 0xFFFFFFFF, 0.45f);
+            drawBeam(c, head - bh * 0.5f, sy, bh, barL, glowA, Colors.blend(tint, 0xFFFFFFFF, 0.4f));
+            glowPaint.setColor(Colors.withAlpha(0xFFFFFFFF, glowA * 0.5f));
+            c.drawCircle(head - bh * 0.6f, sy, bh * 1.1f, glowPaint);
+            fillPaint.setColor(0xFFFFFFFF);
+            fillPaint.setShader(new LinearGradient(barL, 0, head, 0, Colors.withAlpha(tint, a1),
+                    Colors.withAlpha(0xFFFFFFFF, a1), Shader.TileMode.CLAMP));
             c.drawRoundRect(tmpRect, bh / 2f, bh / 2f, fillPaint);
+            fillPaint.setShader(null);
 
             float r2 = rowAlpha(el, 2);
             drawButtons(c, x, y + (1f - r2) * dp(8), alpha * r2);
@@ -4137,6 +4484,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent e) {
+        if (tracker == null) tracker = android.view.VelocityTracker.obtain();
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN) tracker.clear();
+        tracker.addMovement(e);
         if (e.getActionMasked() != MotionEvent.ACTION_DOWN && ignoreGesture) {
             if (e.getActionMasked() == MotionEvent.ACTION_UP || e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 ignoreGesture = false;
@@ -4328,7 +4678,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                         } else {
                             host.onCycle(-1);
                         }
-                    } else if (mode == Mode.EXPANDED && dragAxis == 2 && dy < -dp(48)) {
+                    } else if (mode == Mode.EXPANDED && dragAxis == 2 && (dy < -dp(48) || (dy < -dp(16) && flingVelocity() < -dp(1100)))) {
+                        flingBoost = clamp01(-flingVelocity() / dp(3200));
                         releaseStack();
                         collapse();
                     } else if (mode == Mode.EXPANDED) {
@@ -4417,6 +4768,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     static String formatTimeCentis(long ms) {
         ms = Math.max(0, ms);
+        if (ms >= 3_600_000L) return formatTime(ms);
         return formatTime(ms) + String.format(Locale.US, ".%02d", (ms % 1000) / 10);
     }
 
