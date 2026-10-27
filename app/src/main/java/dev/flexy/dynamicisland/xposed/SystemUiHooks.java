@@ -47,7 +47,7 @@ final class SystemUiHooks {
         HideDuplicated.install(cl);
         TorchNotificationDelay.install(cl);
         ShadeCardTheme.install(cl);
-        ShadeMediaPlayer.install(cl);
+        //ShadeMediaPlayer.install(cl);
         XLog.i("SystemUI hooks installed");
     }
 
