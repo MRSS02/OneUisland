@@ -183,7 +183,6 @@ public final class SettingsActivity extends Activity {
             View b = g.findViewById(id);
             if (b == null || position(key, count) == (int) b.getTag()) return;
             prefs.edit().putInt(key, (int) b.getTag()).apply();
-            preview(g);
             refresh();
         });
         refreshers.add(() -> {

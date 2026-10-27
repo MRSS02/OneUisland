@@ -6,6 +6,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class Entry implements IXposedHookLoadPackage {
     private static boolean systemUiInstalled;
     private static boolean voiceInstalled;
+    private static boolean claudeInstalled;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -27,6 +28,16 @@ public final class Entry implements IXposedHookLoadPackage {
                 VoiceRecorderHook.install(lpparam.classLoader);
             } catch (Throwable t) {
                 XLog.e("voice recorder install failed", t);
+            }
+        }
+        if (ClaudeHook.PACKAGE.equals(lpparam.packageName)
+                && ClaudeHook.PACKAGE.equals(lpparam.processName)
+                && !claudeInstalled) {
+            claudeInstalled = true;
+            try {
+                ClaudeHook.install(lpparam.classLoader);
+            } catch (Throwable t) {
+                XLog.e("claude install failed", t);
             }
         }
     }

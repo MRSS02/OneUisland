@@ -225,6 +225,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         alerts.start();
         torch.start();
         VoiceLevels.get().register(ctx, () -> main.post(this::requestRefresh));
+        ClaudeApp.get().register(ctx, () -> main.post(this::requestRefresh));
         IslandSettings.watch(ctx, () -> {
             if (view != null) view.onSettingsChanged();
             updateGeometry();
@@ -361,6 +362,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
             oa.collect(items, hidden, packages);
             media.collect(items, oa.foregroundPackage(), hidden, packages);
             cast.collect(items);
+            ClaudeApp.get().collect(items, ctx);
             if (torch.available()) items.removeIf(FlashlightSource::isSystemTorchItem);
             torch.collect(items, view.isExpanded());
             addSavedRecording(items);
@@ -513,11 +515,12 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         float anchor = Float.NaN;
         float limit = Float.NaN;
         if (position == dev.flexy.dynamicisland.Settings.POS_LEFT) {
-            anchor = clockEnd(b.left);
+            anchor = clockEnd(b.left, tablet);
             holeD = 0f;
             limit = w - 12 * density;
             if (top != null && top.left - b.left > anchor) limit = Math.min(limit, top.left - b.left - 7 * density);
         }
+        if (fader != null) fader.setKeepDate(tablet && position == dev.flexy.dynamicisland.Settings.POS_LEFT);
         boolean glass = (position == dev.flexy.dynamicisland.Settings.POS_LEFT
                 || (tablet && position == dev.flexy.dynamicisland.Settings.POS_CENTER)) && IslandSettings.glassPill(tablet);
         boolean landscape = w > h;
@@ -557,7 +560,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
     private float lastClockEnd = Float.NaN;
     private final Runnable clockMoved = this::updateGeometry;
 
-    private float clockEnd(int windowLeft) {
+    private float clockEnd(int windowLeft, boolean large) {
         View sb = statusBarView;
         int id = sb == null ? 0 : sb.getResources().getIdentifier("clock", "id", "com.android.systemui");
         View clock = id == 0 ? null : sb.findViewById(id);
@@ -587,7 +590,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         }
         if (clock != null && clock.isShown() && clock.getWidth() > 0 && clock.isAttachedToWindow()) {
             clock.getLocationOnScreen(loc);
-            float end = StatusBarIconFader.timeEnd(clock);
+            float end = large ? -1f : StatusBarIconFader.timeEnd(clock);
             if (end <= 0f) end = clock.getWidth() * clock.getScaleX();
             lastClockEnd = loc[0] - windowLeft + end + 8 * density;
         }
