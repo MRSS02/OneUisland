@@ -34,6 +34,17 @@ public final class ClaudeApp {
     private long updatedAt;
     private boolean registered;
     private Runnable onChange;
+    private Context appContext;
+    private boolean bound;
+    private final android.content.ServiceConnection keepAlive = new android.content.ServiceConnection() {
+        @Override
+        public void onServiceConnected(android.content.ComponentName name, android.os.IBinder service) {
+        }
+
+        @Override
+        public void onServiceDisconnected(android.content.ComponentName name) {
+        }
+    };
     private Drawable icon;
     private Drawable spark;
     private PendingIntent open;
@@ -44,6 +55,7 @@ public final class ClaudeApp {
 
     void register(Context ctx, Runnable changed) {
         onChange = changed;
+        appContext = ctx;
         if (registered) return;
         registered = true;
         ctx.registerReceiver(new BroadcastReceiver() {
@@ -68,12 +80,36 @@ public final class ClaudeApp {
         main.removeCallbacks(expire);
         if ("done".equals(state)) main.postDelayed(expire, Math.max(50, DONE_MS + 50 - (SystemClock.uptimeMillis() - updatedAt)));
         else if (!"idle".equals(state) || tasks > 0) main.postDelayed(expire, STALE_MS + 50);
+        updateKeepAlive();
         if (onChange != null) onChange.run();
     }
 
     private final Runnable expire = () -> {
+        updateKeepAlive();
         if (onChange != null) onChange.run();
     };
+
+    private void updateKeepAlive() {
+        long now = SystemClock.uptimeMillis();
+        boolean busy = updatedAt != 0 && now - updatedAt <= STALE_MS
+                && (working(state) || waiting(state) || tasks > 0);
+        if (busy == bound || appContext == null) return;
+        try {
+            if (busy) {
+                Intent i = new Intent("androidx.health.platform.client.ACTION_BIND_SDK_SERVICE")
+                        .setClassName(PACKAGE, "androidx.health.platform.client.impl.sdkservice.HealthDataSdkService");
+                bound = appContext.bindService(i, keepAlive, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
+                XLog.i("claude keep alive " + bound);
+            } else {
+                appContext.unbindService(keepAlive);
+                bound = false;
+                XLog.i("claude keep alive released");
+            }
+        } catch (Throwable t) {
+            bound = false;
+            XLog.e("claude keep alive", t);
+        }
+    }
 
     static boolean waiting(String state) {
         return "question".equals(state) || "permission".equals(state);
