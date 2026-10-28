@@ -30,7 +30,8 @@ public final class IslandItem {
         TEXT,
         CHRONOMETER,
         PROGRESS_RING,
-        WAVEFORM
+        WAVEFORM,
+        CLAUDE
     }
 
     public static final class Shortcut {
@@ -114,6 +115,16 @@ public final class IslandItem {
     public PendingIntent contentIntent;
     public final List<Action> actions = new ArrayList<>();
 
+    public boolean claude;
+    public String claudeState;
+    public String[] claudeStages = new String[0];
+    public String claudeQuestion;
+    public int claudeTasks;
+    public int assistantStyle;
+    public Drawable[] claudeIcons = new Drawable[0];
+    public Drawable claudeTaskIcon;
+    public Drawable claudeSpark;
+
     public boolean isMedia;
     public boolean playing;
     public long mediaPosition = -1;
@@ -189,6 +200,7 @@ public final class IslandItem {
                 && pulsingDot == o.pulsingDot
                 && pillColor == o.pillColor
                 && torch == o.torch
+                && Objects.equals(claudeState, o.claudeState)
                 && recorder == o.recorder
                 && recorderSaved == o.recorderSaved
                 && trailingColor == o.trailingColor

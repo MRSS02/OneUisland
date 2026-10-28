@@ -19,6 +19,7 @@ Get the ready-made APK from [Releases](../../releases).
 - Status bar icons fade out smoothly when the island covers them.
 - Flashlight island: tap the flashlight to switch it on or off, drag along the beam to pick one of the brightness steps or slide to the flashlight to turn it off. The same card replaces the flashlight notification in the shade.
 - Samsung Voice Recorder island: a red waveform that scrolls from right to left with the recording timer, pause and stop buttons in the card, and a short "saved" check after stopping. With Voice Recorder added to the module scope in LSPosed the waveform follows the real microphone level.
+- Claude island: while Claude works in the Claude app (chats and Claude Code sessions), the island shows the Claude icon and a spinning four-dot indicator. The card shows the last three steps with the app's own icons, sliding in with a blur, questions with an "Answer in Claude" button, and the number of running background tasks. Add Claude to the module scope in LSPosed; a Claude Code session is followed while it is open in the app.
 - Stopwatch shows milliseconds in the island, the card and the shade for the first hour. Metric notifications show the chip text the app sends.
 - Frosted glass design (optional): see-through blurred cards with a dark fade at the top and a soft light edge at the bottom.
 - Recent Spotify playlists (optional): four square tiles under the Spotify player, tap one to play it.

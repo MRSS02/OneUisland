@@ -93,7 +93,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private static final long IN_MS = 200;
     private static final long IN_DELAY_MS = 115;
     private static final long ROW_STAGGER_MS = 30;
-    private static final long CARD_STAGGER_MS = 40;
+    private static final long CARD_STAGGER_MS = 70;
     private static final int MAX_CARDS = 4;
 
     private final Host host;
@@ -696,7 +696,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     public boolean isFullyHidden() {
         boolean noShape = mode == Mode.HIDDEN && visibility.isAtRest() && visibility.value() <= 0.001f && cards.isEmpty();
-        boolean holdTouchZone = mode == Mode.HIDDEN && host.hasMinimized() && !suppressed;
+        boolean holdTouchZone = mode == Mode.HIDDEN && host.hasMinimized() && !suppressed && !shadeHidden;
         if (holdTouchZone) return false;
         return noShape
                 || (suppressed && suppress.isAtRest() && suppress.value() <= 0.001f)
@@ -807,14 +807,14 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     }
 
     private static final double BEAM_ANGLE = Math.toRadians(28);
-    private static final long POP_DELAY_MS = 170;
-    private static final long MERGE_MS = 150;
+    private static final long POP_DELAY_MS = 60;
+    private static final long MERGE_MS = 80;
     private long bubbleHoldUntil;
     private final Runnable popBubble = this::popBubbleNow;
 
     private void popBubbleNow() {
         if (mode != Mode.COMPACT || secondary == null) return;
-        split.animateTo(1f, 0.42f, 0.56f);
+        split.animateTo(1f, 0.34f, 0.6f);
         scheduleFrame();
     }
 
@@ -928,7 +928,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         width.animateTo(restWidth(), 0.34f, 0.86f);
         height.animateTo(Math.min(restWidth(), pillH), 0.34f, 0.86f);
         if (mainIn != null) mainOut = mainIn.toOutgoing(now(), 0);
-        split.animateTo(0f, merge > 0 ? 0.24f : 0.3f, 0.92f);
+        split.animateTo(0f, merge > 0 ? 0.18f : 0.3f, 0.92f);
         offsetX.animateTo(0f);
         removeCallbacks(fadePillBlob);
         postDelayed(fadePillBlob, 260);
@@ -962,7 +962,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 c.w.snapTo(pillH * 1.8f);
                 c.h.snapTo(pillH * 0.8f);
                 c.startAt = t + (animateFromPill ? newIndex * CARD_STAGGER_MS : 0);
-                c.contentStart = c.startAt + 200;
+                c.contentStart = c.startAt + 230;
                 newIndex++;
             } else {
                 c.item = it;
@@ -1171,9 +1171,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     c.h.animateTo(c.targetH, 0.34f * speed, 0.9f);
                     if (flingBoost > 0f) c.cy.impulse(-dp(1400) * flingBoost);
                 } else {
-                    c.cy.animateTo(c.targetCy, 0.42f, 0.7f);
-                    c.w.animateTo(c.targetW, 0.36f, 0.72f);
-                    c.h.animateTo(c.targetH, 0.44f, 0.74f);
+                    c.cy.animateTo(c.targetCy, 0.46f, 0.74f);
+                    c.w.animateTo(c.targetW, 0.40f, 0.76f);
+                    c.h.animateTo(c.targetH, 0.48f, 0.78f);
                 }
             }
             active |= !c.launched;
@@ -1218,13 +1218,13 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 float a = vis * pillBlob.value();
                 if (blurRect.width() > 2f && blurRect.height() > 2f) {
                     scaleAroundPill(blurRect, blurRect);
-                    blur.place(PILL_BLUR, blurRect, blurRect.height() / 2f, a, 0);
+                    blur.place(PILL_BLUR, blurRect, blurRect.height() / 2f, a, frostOn() ? FROST_BLUR : 0);
                 }
                 if (split.value() > 0.003f) {
                     computeMain(tmpBlur);
                     computeBubble(tmpBlur, blurRect);
                     scaleAroundPill(tmpBlur, blurRect);
-                    blur.place(BUBBLE_BLUR, blurRect, blurRect.height() / 2f, a, 0);
+                    blur.place(BUBBLE_BLUR, blurRect, blurRect.height() / 2f, a, frostOn() ? FROST_BLUR : 0);
                 }
             }
         }
@@ -1234,6 +1234,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private final RectF blurRect = new RectF();
     private final RectF tmpBlur = new RectF();
     private static final float GLASS_ALPHA = 0.46f;
+    private static final float FROST_PILL = 0.12f;
     private static final int GLASS_COLOR = 0xFF0E0E10;
 
     private boolean glassActive() {
@@ -1260,6 +1261,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         IslandItem detailed = detailedBubbleItem();
         if (waveItem == null && detailed != null && detailed.trailing == IslandItem.Trailing.WAVEFORM) waveItem = detailed;
         if (mainIn != null) need |= runningStopwatch(mainIn.content.item);
+        need |= claudeAnimating();
         need |= now() < rollUntil;
         need |= toggleAnimating();
         need |= torchAnimating();
@@ -1532,9 +1534,14 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         out.set(bx - br, c1y - br, bx + br + extra, c1y + br);
     }
 
+    private static final float SQUASH = 0.14f;
+
     private void computeCard(Card c, RectF out) {
         float w = Math.max(0f, c.w.value());
         float h = Math.max(0f, c.h.value());
+        float squash = clamp01(Math.abs(c.cy.velocity()) / dp(2600)) * SQUASH;
+        h *= 1f + squash;
+        w *= 1f - squash * 0.55f;
         float left = cardLeft(c, w);
         if (w < screenW) left = Math.max(Math.min(left, screenW - cardMargin - w), Math.min(cardMargin, left));
         float top = c.cy.value() - h / 2f;
@@ -1570,7 +1577,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     protected void onDraw(Canvas canvas) {
         checkFonts();
         float vis = surfaceFade ? visibility.value() * suppress.value() : visibleAlpha();
-        if (screenW == 0 || (vis <= 0.003f && !(mode == Mode.HIDDEN && host.hasMinimized()))) return;
+        if (screenW == 0 || (vis <= 0.003f && !(mode == Mode.HIDDEN && host.hasMinimized() && !shadeHidden && !suppressed))) return;
         long t = now();
         computeMain(mainRect);
         int save = canvas.save();
@@ -1611,22 +1618,6 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             neckPath.reset();
             hasNeck = spread > 0.01f && Metaball.neck(c1x, c1y, r1, bx, by, br, spread, neckPath);
         }
-        Card first = firstOpeningCard();
-        boolean hasCardNeck = false;
-        if (first != null && mainRect.width() > 1f) {
-            computeCard(first, cardRect);
-            float gapToPill = cardRect.top - mainRect.bottom;
-            float p = expansion(first);
-            float spread = 0.6f * (1f - clamp01(gapToPill / dp(16))) * (1f - p);
-            if (spread > 0.14f) {
-                float ra = Math.max(mainRect.height(), mainRect.width()) / 2f;
-                float rb = Math.min(Math.min(cardRect.height(), cardRect.width()) / 2f, dp(24));
-                neckPathCard.reset();
-                hasCardNeck = Metaball.neck(mainRect.centerX(), cy, Math.min(ra, pillH / 2f), cardRect.centerX(), cardRect.top + rb, rb,
-                        spread, neckPathCard);
-            }
-        }
-
         boolean pillVisible = mainRect.width() > 0.5f && mainRect.height() > 0.5f;
         boolean glass = glassActive();
         if (!glass && ((pillVisible && mode == Mode.COMPACT) || hasBubble)) {
@@ -1650,12 +1641,12 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             }
         }
         int mainColor = glass ? GLASS_COLOR : bodyColor(mainIn);
-        int glassSave = glass ? canvas.saveLayerAlpha(0, 0, screenW, getHeight(), Math.round(255 * GLASS_ALPHA)) : -1;
+        boolean frost = glass && frostOn();
+        int glassSave = glass ? canvas.saveLayerAlpha(0, 0, screenW, getHeight(), Math.round(255 * (frost ? FROST_PILL : GLASS_ALPHA))) : -1;
         shapePaint.setColor(mainColor);
         shapePaint.setAlpha(Math.round(255 * pillBlob.value()));
         if (pillVisible) canvas.drawRoundRect(mainRect, r, r, shapePaint);
         shapePaint.setColor(glass ? GLASS_COLOR : BODY_BLACK);
-        if (hasCardNeck) canvas.drawPath(neckPathCard, shapePaint);
         shapePaint.setAlpha(255);
         if (hasBubble) {
             shapePaint.setColor(mainColor);
@@ -1667,6 +1658,11 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         if (glass) {
             canvas.restoreToCount(glassSave);
             float rimA = pillBlob.value();
+            if (frost && pillVisible && mode == Mode.COMPACT) drawFrost(canvas, mainRect, r, mainRect.height(), rimA);
+            if (frost && hasBubble) {
+                tmpBlur.set(bubbleRect);
+                drawFrost(canvas, tmpBlur, br, tmpBlur.height(), rimA);
+            }
             if (pillVisible && mode == Mode.COMPACT) {
                 cardStroke.setShader(rimShader(mainRect, rimA));
                 tmpRect.set(mainRect);
@@ -1705,7 +1701,6 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         return it.hasTeams() && it.pillColor != 0 ? it.pillColor : BODY_BLACK;
     }
 
-    private final Path neckPathCard = new Path();
     private android.graphics.LinearGradient rim;
     private float rimH = -1f;
     private float rimTop = Float.NaN;
@@ -1720,6 +1715,17 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                     Colors.withAlpha(0x38FFFFFF, alpha), Colors.withAlpha(0x0FFFFFFF, alpha), android.graphics.Shader.TileMode.CLAMP);
         }
         return rim;
+    }
+
+    private void drawFrost(Canvas canvas, RectF rect, float r, float fullH, float alpha) {
+        cardPaint.setColor(0xFF000000);
+        cardPaint.setDither(true);
+        cardPaint.setShader(frostShade(rect, alpha));
+        canvas.drawRoundRect(rect, r, r, cardPaint);
+        cardPaint.setShader(null);
+        drawTopShadow(canvas, rect, r, fullH, alpha);
+        drawBottomGlow(canvas, rect, r, fullH, alpha);
+        drawBottomRim(canvas, rect, r, alpha);
     }
 
     private android.graphics.LinearGradient frostShade;
@@ -1835,15 +1841,6 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         canvas.restoreToCount(save);
     }
 
-    private Card firstOpeningCard() {
-        Card best = null;
-        for (Card c : cards) {
-            if (!c.leaving && !c.launched) continue;
-            if (best == null || c.cy.value() < best.cy.value()) best = c;
-        }
-        return best;
-    }
-
     private final RectF gooA = new RectF();
     private final RectF gooB = new RectF();
     private final Path gooPath = new Path();
@@ -1893,16 +1890,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         float tint = lerp(1f, glass ? (frost ? FROST_TINT : 0.46f) : 0.9f, g);
         cardPaint.setColor(Colors.withAlpha(glass ? 0xFF0E0E10 : 0xFF141416, tint));
         canvas.drawRoundRect(cardRect, r, r, cardPaint);
-        if (frost && g > 0.003f) {
-            cardPaint.setColor(0xFF000000);
-            cardPaint.setDither(true);
-            cardPaint.setShader(frostShade(cardRect, g));
-            canvas.drawRoundRect(cardRect, r, r, cardPaint);
-            cardPaint.setShader(null);
-            drawTopShadow(canvas, cardRect, r, c.body.h, g);
-            drawBottomGlow(canvas, cardRect, r, c.body.h, g);
-            drawBottomRim(canvas, cardRect, r, g);
-        }
+        if (frost && g > 0.003f) drawFrost(canvas, cardRect, r, c.body.h, g);
         cardStroke.setShader(rimShader(cardRect, 0.4f + 0.6f * p));
         tmpRect.set(cardRect);
         tmpRect.inset(outlineW / 2f, outlineW / 2f);
@@ -2068,6 +2056,8 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 return ringSize;
             case WAVEFORM:
                 return waveBars.length * waveBarW + (waveBars.length - 1) * waveGap;
+            case CLAUDE:
+                return dp(20);
             default:
                 return 0f;
         }
@@ -2089,6 +2079,9 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             case PROGRESS_RING:
                 drawRing(c, right - ringSize / 2f, midY, ringSize / 2f, item.progress,
                         item.accent != 0 ? item.accent : 0xFFFFFFFF, alpha);
+                break;
+            case CLAUDE:
+                drawClaudeRing(c, item, right - w / 2f, midY, w / 2f, alpha);
                 break;
             case WAVEFORM: {
                 float x = right - w;
@@ -2547,6 +2540,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     private CardBody makeBody(IslandItem it, float w, boolean shadeCard) {
         if (it.isMedia) return new MediaBody(it, w);
+        if (it.claude) return new ClaudeBody(it, w);
         if (it.torch) return new TorchBody(it, w);
         if (it.alert) return new AlertBody(it, w);
         if (!shadeCard && it.remoteView != null && remoteLayer != null) {
@@ -4399,6 +4393,327 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         c.restoreToCount(sv);
     }
 
+
+    private boolean claudeLive(IslandItem it) {
+        return it != null && it.claude && !"done".equals(it.claudeState);
+    }
+
+    private boolean claudeAnimating() {
+        if (now() - claudeShiftAt < CLAUDE_SHIFT_MS + 40) return true;
+        if (mode == Mode.COMPACT) {
+            return (mainIn != null && claudeLive(mainIn.content.item)) || (bubbleIn != null && claudeLive(bubbleIn.content.item));
+        }
+        if (mode == Mode.EXPANDED) {
+            for (Card c : cards) if (claudeLive(c.item)) return true;
+        }
+        return false;
+    }
+
+    private final RectF claudeArc = new RectF();
+
+    private void drawClaudeRing(Canvas c, IslandItem item, float cx, float cy, float r, float alpha) {
+        long t = now();
+        String st = item.claudeState == null ? "working" : item.claudeState;
+        if (AssistantApp.waiting(st)) {
+            float p = (float) ((t % 1400) / 1400.0);
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha * 0.45f * (1f - p)));
+            c.drawCircle(cx, cy, r * (0.8f + 0.55f * p), fillPaint);
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
+            c.drawCircle(cx, cy, r * 0.82f, fillPaint);
+            Paint.FontMetrics fm = claudeBadge().getFontMetrics();
+            claudeBadge().setColor(Colors.withAlpha(0xFF1A0E09, alpha));
+            c.drawText("question".equals(st) ? "?" : "!", cx, cy - (fm.ascent + fm.descent) / 2f, claudeBadge());
+            return;
+        }
+        if ("done".equals(st)) {
+            fillPaint.setColor(Colors.withAlpha(0xFF30D158, alpha * 0.2f));
+            c.drawCircle(cx, cy, r * 0.9f, fillPaint);
+            strokePaint.setStrokeWidth(dp(2f));
+            strokePaint.setColor(Colors.withAlpha(0xFF30D158, alpha));
+            checkPath.rewind();
+            checkPath.moveTo(cx - r * 0.38f, cy + r * 0.02f);
+            checkPath.lineTo(cx - r * 0.1f, cy + r * 0.3f);
+            checkPath.lineTo(cx + r * 0.42f, cy - r * 0.3f);
+            Paint.Cap cap = strokePaint.getStrokeCap();
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            c.drawPath(checkPath, strokePaint);
+            strokePaint.setStrokeCap(cap);
+            return;
+        }
+        drawAssistantActivity(c, item, cx, cy, r, alpha);
+    }
+
+    private void drawAssistantActivity(Canvas c, IslandItem item, float cx, float cy, float r, float alpha) {
+        if (item.assistantStyle == AssistantApp.STYLE_PULSE) {
+            double s = now() / 1000.0;
+            float k = (float) (0.5 + 0.5 * Math.sin(s * Math.PI * 2 / 1.1));
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha * (0.18f + 0.18f * k)));
+            c.drawCircle(cx, cy, r * (0.62f + 0.28f * k), fillPaint);
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
+            c.drawCircle(cx, cy, r * (0.36f + 0.12f * k), fillPaint);
+            return;
+        }
+        drawClaudeDots(c, item.accent, cx, cy, r, alpha);
+    }
+
+    private void drawClaudeDots(Canvas c, int color, float cx, float cy, float r, float alpha) {
+        double s = now() / 1000.0;
+        double turn = s * Math.PI * 2 / 1.3;
+        float orbit = r * (0.5f + 0.06f * (float) Math.sin(s * Math.PI * 2 / 0.65));
+        float dot = r * 0.25f;
+        for (int i = 0; i < 4; i++) {
+            double a = turn + i * Math.PI / 2;
+            float k = 0.75f + 0.25f * (float) (0.5 + 0.5 * Math.cos(a - turn * 2));
+            fillPaint.setColor(Colors.withAlpha(color, alpha * k));
+            c.drawCircle(cx + orbit * (float) Math.cos(a), cy + orbit * (float) Math.sin(a), dot, fillPaint);
+        }
+    }
+
+    private TextPaint claudeBadgePaint;
+
+    private TextPaint claudeBadge() {
+        if (claudeBadgePaint == null) {
+            claudeBadgePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            claudeBadgePaint.setTypeface(Fonts.of(800));
+            claudeBadgePaint.setTextSize(sp(12.5f));
+            claudeBadgePaint.setTextAlign(Paint.Align.CENTER);
+        }
+        return claudeBadgePaint;
+    }
+
+    private static final long CLAUDE_SHIFT_MS = 460;
+    private String[] claudeShown = new String[0];
+    private String claudeDropped;
+    private Drawable claudeDroppedIcon;
+    private Drawable[] claudeShownIcons = new Drawable[0];
+    private long claudeShiftAt;
+
+    private void trackClaudeStages(String[] now) {
+        if (java.util.Arrays.equals(now, claudeShown)) return;
+        String[] old = claudeShown;
+        claudeShown = now;
+        boolean appended = now.length > 0 && old.length > 0
+                && !now[now.length - 1].equals(old[old.length - 1])
+                && (now.length < 2 || now[now.length - 2].equals(old[old.length - 1]));
+        if (appended) {
+            claudeDropped = old.length == now.length ? old[0] : null;
+            claudeDroppedIcon = claudeShownIcons.length > 0 ? claudeShownIcons[0] : null;
+            claudeShiftAt = now();
+        } else {
+            claudeDropped = null;
+            claudeShiftAt = 0;
+        }
+        scheduleFrame();
+    }
+
+    private static Drawable claudeFrame(Drawable d, long time, boolean animate) {
+        if (!(d instanceof android.graphics.drawable.AnimationDrawable)) return d;
+        android.graphics.drawable.AnimationDrawable a = (android.graphics.drawable.AnimationDrawable) d;
+        int n = a.getNumberOfFrames();
+        if (n == 0) return d;
+        if (!animate) return a.getFrame(0);
+        int total = 0;
+        for (int i = 0; i < n; i++) total += Math.max(1, a.getDuration(i));
+        long pos = time % total;
+        for (int i = 0; i < n; i++) {
+            pos -= Math.max(1, a.getDuration(i));
+            if (pos < 0) return a.getFrame(i);
+        }
+        return a.getFrame(0);
+    }
+
+    private final java.util.HashMap<Integer, BlurMaskFilter> claudeBlurs = new java.util.HashMap<>();
+
+    private BlurMaskFilter claudeBlur(float radius) {
+        int key = Math.round(radius * 2f);
+        if (key <= 0) return null;
+        BlurMaskFilter f = claudeBlurs.get(key);
+        if (f == null) {
+            f = new BlurMaskFilter(key / 2f, BlurMaskFilter.Blur.NORMAL);
+            claudeBlurs.put(key, f);
+        }
+        return f;
+    }
+
+    private final class ClaudeBody extends CardBody {
+        static final int ROWS = 3;
+        final float pad = dp(18);
+        final float iconSize = dp(22);
+        final float rowH = dp(26);
+        final float ROW_ICON = dp(16);
+        final StaticLayout question;
+        final float rowsTop;
+        final float questionTop;
+        final float actionsTop;
+        final float footerTop;
+
+        ClaudeBody(IslandItem item, float w) {
+            super(item, w);
+            int textW = Math.max(1, Math.round(w - pad * 2 - iconSize - dp(12)));
+            Paint.FontMetrics tf = titlePaint.getFontMetrics();
+            Paint.FontMetrics bf = bodyPaint.getFontMetrics();
+            float y = pad + (tf.descent - tf.ascent) + dp(3) + (bf.descent - bf.ascent);
+            y = Math.max(y, pad + iconSize);
+            boolean waiting = AssistantApp.waiting(item.claudeState) && item.claudeQuestion != null;
+            if (waiting) {
+                question = layout(item.claudeQuestion, bodyPaint, Math.max(1, Math.round(w - pad * 2)), 5);
+                questionTop = y + dp(10);
+                y = questionTop + question.getHeight();
+                rowsTop = -1;
+                actionsTop = y + dp(14);
+                Btn b = new Btn();
+                b.label = "permission".equals(item.claudeState) ? AssistantApp.text("Open in ", "Открыть в ") + item.title
+                        : AssistantApp.text("Answer in ", "Ответить в ") + item.title;
+                b.bg = 0x2EFFFFFF;
+                b.run = () -> {
+                    IslandController c = IslandController.get();
+                    if (c != null) c.onOpenItem(item, null);
+                    try {
+                        Object sbm = getContext().getSystemService("statusbar");
+                        sbm.getClass().getMethod("collapsePanels").invoke(sbm);
+                    } catch (Throwable ignored) {
+                    }
+                };
+                b.r.set(pad, actionsTop, w - pad, actionsTop + dp(40));
+                buttons.add(b);
+                y = actionsTop + dp(40);
+                footerTop = item.claudeTasks > 0 ? y + dp(14) : -1;
+                if (footerTop >= 0) y = footerTop + rowH;
+            } else {
+                question = null;
+                questionTop = -1;
+                actionsTop = -1;
+                rowsTop = y + dp(12);
+                y = rowsTop + rowH * ROWS;
+                footerTop = item.claudeTasks > 0 ? y + dp(8) : -1;
+                if (footerTop >= 0) y = footerTop + rowH;
+            }
+            h = y + pad;
+        }
+
+        @Override
+        void draw(Canvas c, float x, float y, float alpha, long el) {
+            String st = item.claudeState == null ? "working" : item.claudeState;
+            boolean live = AssistantApp.working(st);
+            float a0 = alpha * rowAlpha(el, 0);
+            float dy0 = (1f - rowAlpha(el, 0)) * dp(8);
+            float ty = y + pad + dy0;
+            Paint.FontMetrics tf = titlePaint.getFontMetrics();
+            titlePaint.setColor(Colors.withAlpha(0xFFFFFFFF, a0));
+            c.drawText(String.valueOf(item.title), x + pad, ty - tf.ascent, titlePaint);
+            ty += tf.descent - tf.ascent + dp(3);
+            Paint.FontMetrics bf = bodyPaint.getFontMetrics();
+            int stateColor = AssistantApp.waiting(st) && item.accent != 0xFFFFFFFF ? item.accent : 0xD9FFFFFF;
+            bodyPaint.setColor(Colors.withAlpha(stateColor, a0));
+            c.drawText(AssistantApp.stateLabel(st), x + pad, ty - bf.ascent, bodyPaint);
+            if (item.icon != null) drawDrawable(c, item.icon, item.iconIsImage, 0xFFFFFFFF, x + w - pad - iconSize, y + pad + dy0, iconSize, a0, 0);
+            if (question != null) {
+                float ra = rowAlpha(el, 1);
+                bodyPaint.setColor(Colors.withAlpha(0xFFFFFFFF, alpha * ra));
+                drawLayout(c, question, x + pad, y + questionTop + (1f - ra) * dp(8));
+                float rb = rowAlpha(el, 2);
+                drawButtons(c, x, y + (1f - rb) * dp(8), alpha * rb);
+                drawFooter(c, x, y, alpha * rowAlpha(el, 3));
+                return;
+            }
+            trackClaudeStages(item.claudeStages);
+            claudeShownIcons = item.claudeIcons;
+            float ra = rowAlpha(el, 1);
+            drawRows(c, x, y + rowsTop + (1f - ra) * dp(8), alpha * ra, live);
+            drawFooter(c, x, y, alpha * rowAlpha(el, 2));
+        }
+
+        private void drawFooter(Canvas c, float x, float y, float alpha) {
+            if (footerTop < 0 || alpha <= 0.003f) return;
+            float top = y + footerTop;
+            fillPaint.setColor(Colors.withAlpha(0x14FFFFFF, alpha));
+            c.drawRect(x + pad, top - dp(4), x + w - pad, top - dp(4) + Math.max(1f, dp(0.7f)), fillPaint);
+            float cy = top + rowH / 2f;
+            if (item.claudeTaskIcon != null) {
+                drawDrawable(c, item.claudeTaskIcon, false, 0x99FFFFFF, x + pad, cy - ROW_ICON / 2f, ROW_ICON, alpha, 0);
+            } else {
+                drawAssistantActivity(c, item, x + pad + ROW_ICON / 2f, cy, ROW_ICON * 0.42f, alpha * 0.8f);
+            }
+            Paint.FontMetrics fm = bodyPaint.getFontMetrics();
+            bodyPaint.setColor(Colors.withAlpha(0x99FFFFFF, alpha));
+            c.drawText(AssistantApp.tasksLabel(item.claudeTasks), x + pad + ROW_ICON + dp(10), cy - (fm.ascent + fm.descent) / 2f, bodyPaint);
+        }
+
+        private void drawRows(Canvas c, float x, float top, float alpha, boolean live) {
+            String[] rows = item.claudeStages;
+            float e = claudeShiftAt == 0 ? 1f : easeInOut(clamp01((now() - claudeShiftAt) / (float) CLAUDE_SHIFT_MS));
+            boolean moving = e < 1f;
+            float maxW = w - pad * 2 - ROW_ICON - dp(10);
+            float textX = x + pad + ROW_ICON + dp(10);
+            Paint.FontMetrics fm = bodyPaint.getFontMetrics();
+            float base = -(fm.ascent + fm.descent) / 2f;
+            int first = ROWS - rows.length;
+            if (moving && claudeDropped != null) {
+                float cy = top + rowH / 2f - e * rowH;
+                drawRowIcon(c, x + pad, cy, false, claudeDroppedIcon, alpha * (1f - e) * 0.25f);
+                drawRow(c, claudeDropped, textX, cy + base, maxW, 0x40FFFFFF, alpha * (1f - e), dp(6) * e);
+            }
+            for (int i = 0; i < rows.length; i++) {
+                int slot = first + i;
+                boolean newest = i == rows.length - 1;
+                float cy = top + slot * rowH + rowH / 2f + (moving ? (1f - e) * rowH : 0f);
+                int color = newest ? 0xFFFFFFFF : slot == ROWS - 2 ? 0x8CFFFFFF : 0x4DFFFFFF;
+                if (moving && !newest) {
+                    int from = slot + 1 == ROWS - 1 ? 0xFFFFFFFF : 0x8CFFFFFF;
+                    color = Colors.blend(from, color, e);
+                }
+                float blur = moving ? (newest ? dp(6) * (1f - e) : dp(2.5f) * (float) Math.sin(Math.PI * e)) : 0f;
+                float ra = alpha * (moving && newest ? e : 1f);
+                Drawable icon = i < item.claudeIcons.length ? item.claudeIcons[i] : null;
+                drawRowIcon(c, x + pad, cy, newest && live, icon, ra * ((color >>> 24) / 255f));
+                drawRow(c, rows[i], textX, cy + base, maxW, color, ra, blur);
+            }
+        }
+
+        private void drawRowIcon(Canvas c, float x, float cy, boolean animated, Drawable icon, float alpha) {
+            if (alpha <= 0.003f) return;
+            if (animated) {
+                drawAssistantActivity(c, item, x + ROW_ICON / 2f, cy, ROW_ICON / 2f, alpha);
+                return;
+            }
+            if (icon == null) {
+                fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
+                c.drawCircle(x + ROW_ICON / 2f, cy, dp(3.2f), fillPaint);
+                return;
+            }
+            boolean spark = icon == item.icon && item.iconIsImage;
+            drawDrawable(c, icon, spark, 0xFFFFFFFF, x, cy - ROW_ICON / 2f, ROW_ICON, alpha, 0);
+        }
+
+        private void drawRow(Canvas c, String text, float x, float baseline, float maxW, int color, float alpha, float blur) {
+            if (alpha <= 0.003f || text == null) return;
+            bodyPaint.setColor(Colors.withAlpha(color, alpha));
+            bodyPaint.setMaskFilter(claudeBlur(blur));
+            c.drawText(TextUtils.ellipsize(text, bodyPaint, maxW, TextUtils.TruncateAt.END).toString(), x, baseline, bodyPaint);
+            bodyPaint.setMaskFilter(null);
+        }
+    }
+
+    private TextPaint claudeStageText;
+    private TextPaint claudeQuestionText;
+
+    private TextPaint claudeStagePaint() {
+        if (claudeStageText == null) {
+            claudeStageText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            claudeStageText.setTypeface(Fonts.of(500));
+            claudeStageText.setTextSize(sp(14f));
+        }
+        return claudeStageText;
+    }
+
+    private TextPaint claudeQuestionPaint() {
+        if (claudeQuestionText == null) {
+            claudeQuestionText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            claudeQuestionText.setTypeface(Fonts.of(500));
+            claudeQuestionText.setTextSize(sp(16f));
+        }
+        return claudeQuestionText;
+    }
 
     private static final class Layer {
         final Content content;
