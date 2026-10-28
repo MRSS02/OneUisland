@@ -43,7 +43,7 @@ final class SystemUiHooks {
         if (Build.VERSION.SDK_INT == 36) hookAndroid16Chips(cl);
         ShadePerf.install(cl);
         ShadeLayoutCallbacks.install();
-        ShadeLiveCards.install(cl);
+        //ShadeLiveCards.install(cl);
         HideDuplicated.install(cl);
         TorchNotificationDelay.install(cl);
         ShadeCardTheme.install(cl);
