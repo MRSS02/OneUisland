@@ -12,8 +12,8 @@ final class ClaudeStream {
     private String question;
 
     ClaudeStream() {
-        ClaudeReporter.working();
-        ClaudeReporter.stage("think", ClaudeReporter.label("Thinking", "Думает"));
+        AssistantReporter.working();
+        AssistantReporter.stage("think", AssistantReporter.label("Thinking", "Думает"));
     }
 
     static boolean interesting(String url) {
@@ -33,8 +33,8 @@ final class ClaudeStream {
     }
 
     synchronized void finish(boolean failed) {
-        if (question != null) ClaudeReporter.pendingQuestion(question);
-        ClaudeReporter.finished(!failed);
+        if (question != null) AssistantReporter.pendingQuestion(question);
+        AssistantReporter.finished(!failed);
     }
 
     private void onData(String data) {
@@ -65,16 +65,16 @@ final class ClaudeStream {
             toolName = block.optString("name", null);
             toolInput.setLength(0);
             String label = first(block, "message", "display_name");
-            ClaudeReporter.stage(toolKind(toolName), label != null ? label : toolLabel(toolName));
+            AssistantReporter.stage(toolKind(toolName), label != null ? label : toolLabel(toolName));
         } else if ("text".equals(type)) {
-            ClaudeReporter.stage("text", ClaudeReporter.label("Writing the answer", "Пишет ответ"));
+            AssistantReporter.stage("text", AssistantReporter.label("Writing the answer", "Пишет ответ"));
         } else if ("thinking".equals(type)) {
-            ClaudeReporter.stage("think", ClaudeReporter.label("Thinking", "Думает"));
+            AssistantReporter.stage("think", AssistantReporter.label("Thinking", "Думает"));
             JSONArray summaries = block.optJSONArray("summaries");
             if (summaries == null) return;
             for (int i = 0; i < summaries.length(); i++) {
                 JSONObject s = summaries.optJSONObject(i);
-                if (s != null) ClaudeReporter.stage("think", s.optString("summary"));
+                if (s != null) AssistantReporter.stage("think", s.optString("summary"));
             }
         }
     }
@@ -84,7 +84,7 @@ final class ClaudeStream {
         String type = delta.optString("type");
         if ("thinking_summary_delta".equals(type)) {
             JSONObject s = delta.optJSONObject("summary");
-            ClaudeReporter.stage("think", s != null ? s.optString("summary") : delta.optString("summary"));
+            AssistantReporter.stage("think", s != null ? s.optString("summary") : delta.optString("summary"));
         } else if ("input_json_delta".equals(type) && toolName != null && toolInput.length() < 20000) {
             toolInput.append(delta.optString("partial_json"));
         }
@@ -120,13 +120,13 @@ final class ClaudeStream {
     }
 
     private static String toolLabel(String name) {
-        if (name == null) return ClaudeReporter.label("Using a tool", "Использует инструмент");
+        if (name == null) return AssistantReporter.label("Using a tool", "Использует инструмент");
         String n = name.toLowerCase(Locale.ROOT);
-        if (n.contains("search")) return ClaudeReporter.label("Searching the web", "Ищет в интернете");
-        if (n.contains("fetch")) return ClaudeReporter.label("Reading a page", "Читает страницу");
-        if (n.contains("artifact") || n.contains("create") || n.contains("edit")) return ClaudeReporter.label("Writing", "Пишет");
-        if (n.contains("repl") || n.contains("analysis") || n.contains("bash")) return ClaudeReporter.label("Running code", "Запускает код");
-        return ClaudeReporter.label("Using ", "Использует ") + name.replace('_', ' ');
+        if (n.contains("search")) return AssistantReporter.label("Searching the web", "Ищет в интернете");
+        if (n.contains("fetch")) return AssistantReporter.label("Reading a page", "Читает страницу");
+        if (n.contains("artifact") || n.contains("create") || n.contains("edit")) return AssistantReporter.label("Writing", "Пишет");
+        if (n.contains("repl") || n.contains("analysis") || n.contains("bash")) return AssistantReporter.label("Running code", "Запускает код");
+        return AssistantReporter.label("Using ", "Использует ") + name.replace('_', ' ');
     }
 
     private static String first(JSONObject o, String... keys) {

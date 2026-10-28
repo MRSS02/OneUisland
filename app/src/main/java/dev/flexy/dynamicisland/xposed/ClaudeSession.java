@@ -27,7 +27,7 @@ final class ClaudeSession {
                 onUser(o.optJSONObject("message"));
                 break;
             case "result":
-                ClaudeReporter.finished(!o.optBoolean("is_error"));
+                AssistantReporter.finished(!o.optBoolean("is_error"));
                 break;
             case "control_request":
                 onControl(o.optJSONObject("request"));
@@ -54,22 +54,22 @@ final class ClaudeSession {
     private static void onAssistant(JSONObject message) {
         JSONArray content = message == null ? null : message.optJSONArray("content");
         if (content == null) return;
-        ClaudeReporter.working();
+        AssistantReporter.working();
         for (int i = 0; i < content.length(); i++) {
             JSONObject block = content.optJSONObject(i);
             if (block == null) continue;
             switch (block.optString("type")) {
                 case "thinking":
                 case "redacted_thinking":
-                    ClaudeReporter.stage("think", ClaudeReporter.label("Thinking", "Думает"));
+                    AssistantReporter.stage("think", AssistantReporter.label("Thinking", "Думает"));
                     break;
                 case "text":
-                    ClaudeReporter.stage("text", firstSentence(block.optString("text")));
+                    AssistantReporter.stage("text", firstSentence(block.optString("text")));
                     break;
                 case "tool_use":
                     JSONObject input = block.optJSONObject("input");
                     if (input != null && input.optBoolean("run_in_background")) {
-                        ClaudeReporter.taskStarted(block.optString("id", null));
+                        AssistantReporter.taskStarted(block.optString("id", null));
                     }
                     onTool(block.optString("name"), input);
                     break;
@@ -83,8 +83,8 @@ final class ClaudeSession {
         if (message == null) return;
         Object content = message.opt("content");
         if (content instanceof String) {
-            ClaudeReporter.working();
-            ClaudeReporter.stage("user", ClaudeReporter.label("Reading your message", "Читает ваше сообщение"));
+            AssistantReporter.working();
+            AssistantReporter.stage("user", AssistantReporter.label("Reading your message", "Читает ваше сообщение"));
             return;
         }
         if (!(content instanceof JSONArray)) return;
@@ -92,8 +92,8 @@ final class ClaudeSession {
         for (int i = 0; i < arr.length(); i++) {
             JSONObject b = arr.optJSONObject(i);
             if (b != null && "text".equals(b.optString("type"))) {
-                ClaudeReporter.working();
-                ClaudeReporter.stage("user", ClaudeReporter.label("Reading your message", "Читает ваше сообщение"));
+                AssistantReporter.working();
+                AssistantReporter.stage("user", AssistantReporter.label("Reading your message", "Читает ваше сообщение"));
                 return;
             }
         }
@@ -102,10 +102,23 @@ final class ClaudeSession {
     private static void onSystem(JSONObject o) {
         if (!"task_notification".equals(o.optString("subtype"))) return;
         String status = o.optString("status");
-        if ("running".equals(status) || "started".equals(status)) {
-            ClaudeReporter.taskStarted(o.optString("tool_use_id", null));
-        } else {
-            ClaudeReporter.taskEnded(o.optString("tool_use_id", null));
+        String id = o.optString("tool_use_id", null);
+        switch (status) {
+            case "running":
+            case "started":
+                AssistantReporter.taskStarted(id);
+                break;
+            case "completed":
+            case "failed":
+            case "killed":
+            case "stopped":
+            case "cancelled":
+            case "canceled":
+            case "error":
+                AssistantReporter.taskEnded(id);
+                break;
+            default:
+                break;
         }
     }
 
@@ -114,8 +127,8 @@ final class ClaudeSession {
         String tool = request.optString("tool_name");
         JSONObject input = request.optJSONObject("input");
         String what = input == null ? null : first(input, "description", "command", "file_path", "url");
-        String text = ClaudeReporter.label("Allow ", "Разрешить ") + tool + (what != null ? ": " + what : "") + "?";
-        ClaudeReporter.ask(text, true);
+        String text = AssistantReporter.label("Allow ", "Разрешить ") + tool + (what != null ? ": " + what : "") + "?";
+        AssistantReporter.ask(text, true);
     }
 
     private static void onTool(String name, JSONObject in) {
@@ -126,17 +139,17 @@ final class ClaudeSession {
             JSONArray qs = in.optJSONArray("questions");
             JSONObject q = qs != null && qs.length() > 0 ? qs.optJSONObject(0) : null;
             String text = q != null ? first(q, "question", "header") : first(in, "question");
-            ClaudeReporter.stage("ask", ClaudeReporter.label("Asking you", "Задаёт вопрос"));
-            ClaudeReporter.ask(text, false);
+            AssistantReporter.stage("ask", AssistantReporter.label("Asking you", "Задаёт вопрос"));
+            AssistantReporter.ask(text, false);
             return;
         }
         if (n.endsWith("wrap_up")) {
             String ask = first(in, "ask");
-            if (ask != null) ClaudeReporter.pendingQuestion(ask);
+            if (ask != null) AssistantReporter.pendingQuestion(ask);
             return;
         }
         if (n.endsWith("update_plan") || n.equals("toolsearch") || n.equals("todowrite")) return;
-        ClaudeReporter.stage(toolKind(n), toolLabel(n, name, in));
+        AssistantReporter.stage(toolKind(n), toolLabel(n, name, in));
     }
 
     private static String toolKind(String n) {
@@ -154,27 +167,27 @@ final class ClaudeSession {
         String file = baseName(first(in, "file_path", "notebook_path", "path"));
         if (n.equals("bash") || n.equals("powershell")) {
             String d = first(in, "description");
-            return d != null ? d : ClaudeReporter.label("Running a command", "Запускает команду");
+            return d != null ? d : AssistantReporter.label("Running a command", "Запускает команду");
         }
-        if (n.equals("read")) return ClaudeReporter.label("Reading ", "Читает ") + (file != null ? file : "");
+        if (n.equals("read")) return AssistantReporter.label("Reading ", "Читает ") + (file != null ? file : "");
         if (n.equals("edit") || n.equals("multiedit") || n.equals("write") || n.equals("notebookedit")) {
-            return ClaudeReporter.label("Editing ", "Редактирует ") + (file != null ? file : "");
+            return AssistantReporter.label("Editing ", "Редактирует ") + (file != null ? file : "");
         }
         if (n.equals("grep")) {
             String p = first(in, "pattern");
-            return ClaudeReporter.label("Searching code", "Ищет в коде") + (p != null && p.length() < 40 ? " · " + p : "");
+            return AssistantReporter.label("Searching code", "Ищет в коде") + (p != null && p.length() < 40 ? " · " + p : "");
         }
-        if (n.equals("glob")) return ClaudeReporter.label("Looking for files", "Ищет файлы");
+        if (n.equals("glob")) return AssistantReporter.label("Looking for files", "Ищет файлы");
         if (n.contains("websearch") || n.contains("webfetch") || n.contains("browser")) {
-            return ClaudeReporter.label("Searching the web", "Ищет в интернете");
+            return AssistantReporter.label("Searching the web", "Ищет в интернете");
         }
         if (n.equals("agent") || n.equals("task") || n.equals("workflow")) {
             String d = first(in, "description");
-            return ClaudeReporter.label("Running an agent", "Запускает агента") + (d != null ? " · " + d : "");
+            return AssistantReporter.label("Running an agent", "Запускает агента") + (d != null ? " · " + d : "");
         }
-        if (n.contains("artifact")) return ClaudeReporter.label("Publishing a page", "Публикует страницу");
+        if (n.contains("artifact")) return AssistantReporter.label("Publishing a page", "Публикует страницу");
         String clean = name.startsWith("mcp__") ? name.substring(name.lastIndexOf("__") + 2) : name;
-        return ClaudeReporter.label("Using ", "Использует ") + clean.replace('_', ' ');
+        return AssistantReporter.label("Using ", "Использует ") + clean.replace('_', ' ');
     }
 
     private static String firstSentence(String text) {

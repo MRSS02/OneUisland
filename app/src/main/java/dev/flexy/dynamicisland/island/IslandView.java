@@ -696,7 +696,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
 
     public boolean isFullyHidden() {
         boolean noShape = mode == Mode.HIDDEN && visibility.isAtRest() && visibility.value() <= 0.001f && cards.isEmpty();
-        boolean holdTouchZone = mode == Mode.HIDDEN && host.hasMinimized() && !suppressed;
+        boolean holdTouchZone = mode == Mode.HIDDEN && host.hasMinimized() && !suppressed && !shadeHidden;
         if (holdTouchZone) return false;
         return noShape
                 || (suppressed && suppress.isAtRest() && suppress.value() <= 0.001f)
@@ -1577,7 +1577,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     protected void onDraw(Canvas canvas) {
         checkFonts();
         float vis = surfaceFade ? visibility.value() * suppress.value() : visibleAlpha();
-        if (screenW == 0 || (vis <= 0.003f && !(mode == Mode.HIDDEN && host.hasMinimized()))) return;
+        if (screenW == 0 || (vis <= 0.003f && !(mode == Mode.HIDDEN && host.hasMinimized() && !shadeHidden && !suppressed))) return;
         long t = now();
         computeMain(mainRect);
         int save = canvas.save();
@@ -4414,11 +4414,11 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
     private void drawClaudeRing(Canvas c, IslandItem item, float cx, float cy, float r, float alpha) {
         long t = now();
         String st = item.claudeState == null ? "working" : item.claudeState;
-        if (ClaudeApp.waiting(st)) {
+        if (AssistantApp.waiting(st)) {
             float p = (float) ((t % 1400) / 1400.0);
-            fillPaint.setColor(Colors.withAlpha(ClaudeApp.ACCENT, alpha * 0.45f * (1f - p)));
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha * 0.45f * (1f - p)));
             c.drawCircle(cx, cy, r * (0.8f + 0.55f * p), fillPaint);
-            fillPaint.setColor(Colors.withAlpha(ClaudeApp.ACCENT, alpha));
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
             c.drawCircle(cx, cy, r * 0.82f, fillPaint);
             Paint.FontMetrics fm = claudeBadge().getFontMetrics();
             claudeBadge().setColor(Colors.withAlpha(0xFF1A0E09, alpha));
@@ -4440,10 +4440,23 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             strokePaint.setStrokeCap(cap);
             return;
         }
-        drawClaudeDots(c, cx, cy, r, alpha);
+        drawAssistantActivity(c, item, cx, cy, r, alpha);
     }
 
-    private void drawClaudeDots(Canvas c, float cx, float cy, float r, float alpha) {
+    private void drawAssistantActivity(Canvas c, IslandItem item, float cx, float cy, float r, float alpha) {
+        if (item.assistantStyle == AssistantApp.STYLE_PULSE) {
+            double s = now() / 1000.0;
+            float k = (float) (0.5 + 0.5 * Math.sin(s * Math.PI * 2 / 1.1));
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha * (0.18f + 0.18f * k)));
+            c.drawCircle(cx, cy, r * (0.62f + 0.28f * k), fillPaint);
+            fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
+            c.drawCircle(cx, cy, r * (0.36f + 0.12f * k), fillPaint);
+            return;
+        }
+        drawClaudeDots(c, item.accent, cx, cy, r, alpha);
+    }
+
+    private void drawClaudeDots(Canvas c, int color, float cx, float cy, float r, float alpha) {
         double s = now() / 1000.0;
         double turn = s * Math.PI * 2 / 1.3;
         float orbit = r * (0.5f + 0.06f * (float) Math.sin(s * Math.PI * 2 / 0.65));
@@ -4451,7 +4464,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         for (int i = 0; i < 4; i++) {
             double a = turn + i * Math.PI / 2;
             float k = 0.75f + 0.25f * (float) (0.5 + 0.5 * Math.cos(a - turn * 2));
-            fillPaint.setColor(Colors.withAlpha(ClaudeApp.ACCENT, alpha * k));
+            fillPaint.setColor(Colors.withAlpha(color, alpha * k));
             c.drawCircle(cx + orbit * (float) Math.cos(a), cy + orbit * (float) Math.sin(a), dot, fillPaint);
         }
     }
@@ -4541,7 +4554,7 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             Paint.FontMetrics bf = bodyPaint.getFontMetrics();
             float y = pad + (tf.descent - tf.ascent) + dp(3) + (bf.descent - bf.ascent);
             y = Math.max(y, pad + iconSize);
-            boolean waiting = ClaudeApp.waiting(item.claudeState) && item.claudeQuestion != null;
+            boolean waiting = AssistantApp.waiting(item.claudeState) && item.claudeQuestion != null;
             if (waiting) {
                 question = layout(item.claudeQuestion, bodyPaint, Math.max(1, Math.round(w - pad * 2)), 5);
                 questionTop = y + dp(10);
@@ -4549,12 +4562,15 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
                 rowsTop = -1;
                 actionsTop = y + dp(14);
                 Btn b = new Btn();
-                b.label = "permission".equals(item.claudeState) ? ClaudeApp.text("Open in Claude", "Открыть в Claude")
-                        : ClaudeApp.text("Answer in Claude", "Ответить в Claude");
+                b.label = "permission".equals(item.claudeState) ? AssistantApp.text("Open in ", "Открыть в ") + item.title
+                        : AssistantApp.text("Answer in ", "Ответить в ") + item.title;
                 b.bg = 0x2EFFFFFF;
                 b.run = () -> {
+                    IslandController c = IslandController.get();
+                    if (c != null) c.onOpenItem(item, null);
                     try {
-                        if (item.contentIntent != null) item.contentIntent.send();
+                        Object sbm = getContext().getSystemService("statusbar");
+                        sbm.getClass().getMethod("collapsePanels").invoke(sbm);
                     } catch (Throwable ignored) {
                     }
                 };
@@ -4578,19 +4594,19 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         @Override
         void draw(Canvas c, float x, float y, float alpha, long el) {
             String st = item.claudeState == null ? "working" : item.claudeState;
-            boolean live = ClaudeApp.working(st);
+            boolean live = AssistantApp.working(st);
             float a0 = alpha * rowAlpha(el, 0);
             float dy0 = (1f - rowAlpha(el, 0)) * dp(8);
             float ty = y + pad + dy0;
             Paint.FontMetrics tf = titlePaint.getFontMetrics();
             titlePaint.setColor(Colors.withAlpha(0xFFFFFFFF, a0));
-            c.drawText("Claude", x + pad, ty - tf.ascent, titlePaint);
+            c.drawText(String.valueOf(item.title), x + pad, ty - tf.ascent, titlePaint);
             ty += tf.descent - tf.ascent + dp(3);
             Paint.FontMetrics bf = bodyPaint.getFontMetrics();
-            int stateColor = ClaudeApp.waiting(st) ? ClaudeApp.ACCENT : 0xD9FFFFFF;
+            int stateColor = AssistantApp.waiting(st) && item.accent != 0xFFFFFFFF ? item.accent : 0xD9FFFFFF;
             bodyPaint.setColor(Colors.withAlpha(stateColor, a0));
-            c.drawText(ClaudeApp.stateLabel(st), x + pad, ty - bf.ascent, bodyPaint);
-            if (item.icon != null) drawDrawable(c, item.icon, true, 0, x + w - pad - iconSize, y + pad + dy0, iconSize, a0, 0);
+            c.drawText(AssistantApp.stateLabel(st), x + pad, ty - bf.ascent, bodyPaint);
+            if (item.icon != null) drawDrawable(c, item.icon, item.iconIsImage, 0xFFFFFFFF, x + w - pad - iconSize, y + pad + dy0, iconSize, a0, 0);
             if (question != null) {
                 float ra = rowAlpha(el, 1);
                 bodyPaint.setColor(Colors.withAlpha(0xFFFFFFFF, alpha * ra));
@@ -4616,11 +4632,11 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
             if (item.claudeTaskIcon != null) {
                 drawDrawable(c, item.claudeTaskIcon, false, 0x99FFFFFF, x + pad, cy - ROW_ICON / 2f, ROW_ICON, alpha, 0);
             } else {
-                drawClaudeDots(c, x + pad + ROW_ICON / 2f, cy, ROW_ICON * 0.42f, alpha * 0.8f);
+                drawAssistantActivity(c, item, x + pad + ROW_ICON / 2f, cy, ROW_ICON * 0.42f, alpha * 0.8f);
             }
             Paint.FontMetrics fm = bodyPaint.getFontMetrics();
             bodyPaint.setColor(Colors.withAlpha(0x99FFFFFF, alpha));
-            c.drawText(ClaudeApp.tasksLabel(item.claudeTasks), x + pad + ROW_ICON + dp(10), cy - (fm.ascent + fm.descent) / 2f, bodyPaint);
+            c.drawText(AssistantApp.tasksLabel(item.claudeTasks), x + pad + ROW_ICON + dp(10), cy - (fm.ascent + fm.descent) / 2f, bodyPaint);
         }
 
         private void drawRows(Canvas c, float x, float top, float alpha, boolean live) {
@@ -4657,15 +4673,15 @@ public final class IslandView extends View implements Choreographer.FrameCallbac
         private void drawRowIcon(Canvas c, float x, float cy, boolean animated, Drawable icon, float alpha) {
             if (alpha <= 0.003f) return;
             if (animated) {
-                drawClaudeDots(c, x + ROW_ICON / 2f, cy, ROW_ICON / 2f, alpha);
+                drawAssistantActivity(c, item, x + ROW_ICON / 2f, cy, ROW_ICON / 2f, alpha);
                 return;
             }
             if (icon == null) {
-                fillPaint.setColor(Colors.withAlpha(ClaudeApp.ACCENT, alpha));
+                fillPaint.setColor(Colors.withAlpha(item.accent, alpha));
                 c.drawCircle(x + ROW_ICON / 2f, cy, dp(3.2f), fillPaint);
                 return;
             }
-            boolean spark = icon == item.icon;
+            boolean spark = icon == item.icon && item.iconIsImage;
             drawDrawable(c, icon, spark, 0xFFFFFFFF, x, cy - ROW_ICON / 2f, ROW_ICON, alpha, 0);
         }
 

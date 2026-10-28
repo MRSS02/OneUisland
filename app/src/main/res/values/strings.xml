@@ -6,5 +6,6 @@
         <item>com.android.systemui</item>
         <item>com.sec.android.app.voicenote</item>
         <item>com.anthropic.claude</item>
+        <item>com.openai.chatgpt</item>
     </string-array>
 </resources>

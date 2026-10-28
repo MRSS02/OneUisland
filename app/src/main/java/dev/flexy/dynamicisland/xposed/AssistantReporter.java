@@ -10,8 +10,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-final class ClaudeReporter {
+final class AssistantReporter {
     static final String ACTION = "dev.flexy.dynamicisland.CLAUDE";
+    static String app = "claude";
     static final String WORKING = "working";
     static final String QUESTION = "question";
     static final String PERMISSION = "permission";
@@ -30,7 +31,7 @@ final class ClaudeReporter {
     private static long sentAt;
     private static Handler handler;
 
-    private ClaudeReporter() {
+    private AssistantReporter() {
     }
 
     static synchronized void working() {
@@ -91,8 +92,10 @@ final class ClaudeReporter {
         if (posted) return;
         posted = true;
         long wait = Math.max(0, SEND_MS - (SystemClock.uptimeMillis() - sentAt));
-        handler.postDelayed(ClaudeReporter::send, wait);
+        handler.postDelayed(AssistantReporter::send, wait);
     }
+
+    private static final Runnable heartbeat = AssistantReporter::schedule;
 
     private static void send() {
         String out;
@@ -100,7 +103,7 @@ final class ClaudeReporter {
         String[] kindList;
         String q;
         int running;
-        synchronized (ClaudeReporter.class) {
+        synchronized (AssistantReporter.class) {
             running = tasks.size();
             posted = false;
             sentAt = SystemClock.uptimeMillis();
@@ -110,12 +113,15 @@ final class ClaudeReporter {
             list = stages.toArray(new String[0]);
             kindList = kinds.toArray(new String[0]);
             q = question;
+            handler.removeCallbacks(heartbeat);
+            if (!IDLE.equals(state) && !DONE.equals(state) || !tasks.isEmpty()) handler.postDelayed(heartbeat, 20_000);
         }
         try {
             Context ctx = (Context) Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null);
             if (ctx == null) return;
             Intent i = new Intent(ACTION).setPackage("com.android.systemui");
             i.putExtra("state", out);
+            i.putExtra("app", app);
             i.putExtra("stages", list);
             i.putExtra("kinds", kindList);
             if (q != null) i.putExtra("question", q);

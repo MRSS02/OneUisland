@@ -120,6 +120,7 @@ public final class IslandItem {
     public String[] claudeStages = new String[0];
     public String claudeQuestion;
     public int claudeTasks;
+    public int assistantStyle;
     public Drawable[] claudeIcons = new Drawable[0];
     public Drawable claudeTaskIcon;
     public Drawable claudeSpark;

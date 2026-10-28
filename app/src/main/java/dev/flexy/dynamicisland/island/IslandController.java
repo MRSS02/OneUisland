@@ -72,6 +72,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
 
     public void onStartedGoingToSleep() {
         startSleepFold();
+        main.postDelayed(this::requestRefresh, 800);
     }
 
     private void startSleepFold() {
@@ -92,6 +93,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
 
     private void showUnlockAlerts() {
         alerts.onUnlocked();
+        requestRefresh();
     }
 
     private final Runnable keyguardWatch = new Runnable() {
@@ -193,6 +195,8 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
     }
 
     public IslandItem itemForKey(String notificationKey) {
+        IslandItem assistant = AssistantApp.itemForKey(notificationKey);
+        if (assistant != null) return assistant;
         if (torch.available() && FlashlightSource.isSystemTorchKey(notificationKey)) return torch.item();
         return oa.itemForKey(notificationKey);
     }
@@ -225,7 +229,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
         alerts.start();
         torch.start();
         VoiceLevels.get().register(ctx, () -> main.post(this::requestRefresh));
-        ClaudeApp.get().register(ctx, () -> main.post(this::requestRefresh));
+        AssistantApp.register(ctx, () -> main.post(this::requestRefresh));
         IslandSettings.watch(ctx, () -> {
             if (view != null) view.onSettingsChanged();
             updateGeometry();
@@ -362,7 +366,7 @@ public final class IslandController implements IslandView.Host, IslandWindow.Lis
             oa.collect(items, hidden, packages);
             media.collect(items, oa.foregroundPackage(), hidden, packages);
             cast.collect(items);
-            ClaudeApp.get().collect(items, ctx);
+            AssistantApp.collectAll(items, ctx);
             if (torch.available()) items.removeIf(FlashlightSource::isSystemTorchItem);
             torch.collect(items, view.isExpanded());
             addSavedRecording(items);

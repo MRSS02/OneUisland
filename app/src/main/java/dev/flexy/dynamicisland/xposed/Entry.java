@@ -7,6 +7,7 @@ public final class Entry implements IXposedHookLoadPackage {
     private static boolean systemUiInstalled;
     private static boolean voiceInstalled;
     private static boolean claudeInstalled;
+    private static boolean gptInstalled;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -40,5 +41,16 @@ public final class Entry implements IXposedHookLoadPackage {
                 XLog.e("claude install failed", t);
             }
         }
+        if (GptHook.PACKAGE.equals(lpparam.packageName)
+                && GptHook.PACKAGE.equals(lpparam.processName)
+                && !gptInstalled) {
+            gptInstalled = true;
+            try {
+                GptHook.install(lpparam.classLoader);
+            } catch (Throwable t) {
+                XLog.e("chatgpt install failed", t);
+            }
+        }
+
     }
 }
